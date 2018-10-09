@@ -16,6 +16,8 @@ if (USE_TF AND USE_CAFFE2)
 (The two libraries have their own protobuf embed)")
 endif()
 
+set(CMAKE_PREFIX_PATH "/home/bugsi/dev/local/lib/pkgconfig")
+
 set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 
@@ -596,6 +598,11 @@ if (USE_NCNN)
   include_directories(${NCNN_INC_DIR})
 endif()
 
+set(LOCAL_LIB_DIR /home/bugsi/dev/local/lib/)
+
+set(LOCAL_INCLUDE_DIR /home/bugsi/dev/local/include/)
+include_directories("${LOCAL_INCLUDE_DIR}")
+
 # main library, main & tests
 include_directories ("${PROJECT_SOURCE_DIR}/src")
 add_subdirectory (src)
@@ -609,10 +616,12 @@ set(COMMON_LINK_DIRS
   ${XGBOOST_LIB_DIR}
   ${TSNE_LIB_DIR}
   ${NCNN_LIB_DIR}
-  ${DLIB_LIB_DIR})
+  ${DLIB_LIB_DIR}
+  ${LOCAL_LIB_DIR})
 if (USE_HDF5)
   set(COMMON_LINK_LIBS
     ddetect ${CUDA_LIB_DEPS} glog gflags ${OpenCV_LIBS} curlpp curl hdf5_cpp ${Boost_LIBRARIES} archive
+    vnn gobject-2.0 glib-2.0 gstapp-1.0 gstbase-1.0 gstreamer-1.0 gstpbutils-1.0
     ${CAFFE_LIB_DEPS}
     ${CAFFE2_LIB_DEPS}
     ${TF_LIB_DEPS}
@@ -623,6 +632,7 @@ if (USE_HDF5)
 else()
   set(COMMON_LINK_LIBS
     ddetect ${CUDA_LIB_DEPS} glog gflags ${OpenCV_LIBS} curlpp curl ${Boost_LIBRARIES} archive
+    vnn gobject-2.0 glib-2.0 gstapp-1.0 gstbase-1.0 gstreamer-1.0 gstpbutils-1.0
     ${CAFFE_LIB_DEPS}
     ${CAFFE2_LIB_DEPS}
     ${TF_LIB_DEPS}
@@ -631,6 +641,7 @@ else()
     ${NCNN_LIB_DEPS}
     ${DLIB_LIB_DEPS})
 endif()
+
 set(HTTP_LINK_LIBS cppnetlib-uri crypto ssl)
 
 add_subdirectory(main)

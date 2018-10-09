@@ -7,7 +7,7 @@ if (USE_HDF5)
   add_definitions(-DUSE_HDF5)
 endif()
 
-set(ddetect_SOURCES deepdetect.h deepdetect.cc mllibstrategy.h mlmodel.h mlservice.h inputconnectorstrategy.h imginputfileconn.h csvinputfileconn.h csvinputfileconn.cc svminputfileconn.h svminputfileconn.cc txtinputfileconn.h txtinputfileconn.cc apidata.h apidata.cc jsonapi.h jsonapi.cc httpjsonapi.cc httpjsonapi.h commandlinejsonapi.h commandlinejsonapi.cc ext/rmustache/mustache.h ext/rmustache/mustache.cc)
+set(ddetect_SOURCES deepdetect.h deepdetect.cc mllibstrategy.h mlmodel.h mlservice.h inputconnectorstrategy.h imginputfileconn.h csvinputfileconn.h csvinputfileconn.cc svminputfileconn.h svminputfileconn.cc txtinputfileconn.h txtinputfileconn.cc vidinputconn.h vidinputconn.cc apidata.h apidata.cc jsonapi.h jsonapi.cc httpjsonapi.cc httpjsonapi.h commandlinejsonapi.h commandlinejsonapi.cc ext/rmustache/mustache.h ext/rmustache/mustache.cc)
 if (USE_CAFFE)
   list(APPEND ddetect_SOURCES backends/caffe/caffelib.h backends/caffe/caffelib.cc backends/caffe/caffemodel.h backends/caffe/caffemodel.cc backends/caffe/caffeinputconns.h backends/caffe/caffeinputconns.cc generators/net_generator.h generators/net_caffe.h generators/net_caffe.cc generators/net_caffe_mlp.h generators/net_caffe_mlp.cc generators/net_caffe_convnet.h generators/net_caffe_convnet.cc generators/net_caffe_resnet.h generators/net_caffe_resnet.cc commandlineapi.h commandlineapi.cc)
 endif()

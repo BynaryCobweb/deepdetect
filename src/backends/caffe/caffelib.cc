@@ -3521,6 +3521,7 @@ namespace dd
 
 
   template class CaffeLib<ImgCaffeInputFileConn,SupervisedOutput,CaffeModel>;
+  template class CaffeLib<VidCaffeInputConn,SupervisedOutput,CaffeModel>;
   template class CaffeLib<CSVCaffeInputFileConn,SupervisedOutput,CaffeModel>;
   template class CaffeLib<TxtCaffeInputFileConn,SupervisedOutput,CaffeModel>;
   template class CaffeLib<SVMCaffeInputFileConn,SupervisedOutput,CaffeModel>;

@@ -556,6 +556,7 @@ namespace dd
   }*/
 
   template class NetInputCaffe<ImgCaffeInputFileConn>;
+  template class NetInputCaffe<VidCaffeInputConn>;
   template class NetInputCaffe<CSVCaffeInputFileConn>;
   template class NetInputCaffe<TxtCaffeInputFileConn>;
   template class NetInputCaffe<SVMCaffeInputFileConn>;
