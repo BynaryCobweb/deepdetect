@@ -544,14 +544,15 @@ namespace dd
     // size of each element in Caffe jargon
     int channels() const
     {
-      return 3;
+      if (_bw) return 1;
+      else return 3; // RGB
     }
-    
+
     int height() const
     {
       return _height;
     }
-    
+
     int width() const
     {
       return _width;
@@ -606,7 +607,6 @@ namespace dd
 	    _width = 224;
 	  if (_height == -1)
 	    _height = 224;
-	  
 	  if (ad.has("has_mean_file"))
 	    _has_mean_file = ad.get("has_mean_file").get<bool>();
 	  APIData ad_input = ad.getobj("parameters").getobj("input");
@@ -635,22 +635,12 @@ namespace dd
 	      _data_mean.FromProto(blob_proto);
 	      mean = _data_mean.mutable_cpu_data();
 	    }
-          // TODO: NBD needed ?
-          /*
-	  if (!_db_fname.empty())
-	    {
-	      _test_dbfullname = _db_fname;
-	      _db = true;
-	      return; // done
-	    }
-            */
 	  else _db = false;
-          // TODO NBD: how to know when stop reading
 	  for (int i=0;i<(int)this->_images.size();i++)
-	    {      
+          {
 	      caffe::Datum datum;
 	      caffe::CVMatToDatum(this->_images.at(i),&datum);
-              /*
+              /* TODO: comented  by nbd check if neededs
 	      if (!_test_labels.empty())
 		datum.set_label(_test_labels.at(i));
                 */
@@ -690,34 +680,24 @@ namespace dd
 	  this->_images.clear();
 	  this->_images_size.clear();
 	}
-	
     }
 
     std::vector<caffe::Datum> get_dv_test(const int &num,
-					  const bool &has_mean_file)
-      {
-		
-	if (!_train &&  _images.empty())
-	  {
-	    int i = 0;
-	    std::vector<caffe::Datum> dv;
-	    while(_dt_vit!=_dv_test.end()
-		  && i < num)
-	      {
-		dv.push_back((*_dt_vit));
-		++i;
-		++_dt_vit;
-	      }
-	    return dv;
-	  }
-	else return get_dv_test_db(num,has_mean_file);
-      }
-    
-    std::vector<caffe::Datum> get_dv_test_db(const int &num,
-		    const bool &has_mean_file)
+        const bool &has_mean_file)
     {
-	    std::vector<caffe::Datum> dv;
-	    return dv;
+      std::vector<caffe::Datum> dv;
+      if ( _images.empty())
+      {
+        int i = 0;
+        while(_dt_vit!=_dv_test.end()
+            && i < num)
+        {
+          dv.push_back((*_dt_vit));
+          ++i;
+          ++_dt_vit;
+        }
+      }
+      return dv;
     }
 
     std::vector<caffe::Datum> get_dv_test_segmentation(const int &num,
