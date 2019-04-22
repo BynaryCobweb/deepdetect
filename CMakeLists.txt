@@ -31,6 +31,9 @@ set (deepdetect_VERSION_MINOR 1)
 # options
 OPTION(BUILD_TESTS "Should the tests be built")
 OPTION(BUILD_TOOLS "Should the tools be built")
+OPTION(USE_COMMAND_LINE "build command line JSON API" ON)
+OPTION(USE_JSON_API "build internal JSON API" ON)
+OPTION(USE_HTTP_SERVER "build http JSON API " ON)
  
 # Get the current working branch
 execute_process(
@@ -49,7 +52,23 @@ execute_process(
 )
 
 set(CMAKE_CXX_FLAGS "-g -Wall -Wextra -fopenmp -O2 -fPIC -std=c++11  -DUSE_OPENCV -DUSE_LMDB")
-  
+
+if (USE_COMMAND_LINE)
+  if (NOT USE_CAFFE)
+    set(USE_JSON_API ON)
+  endif()
+  string(APPEND CMAKE_CXX_FLAGS " -DUSE_COMMANDLINE")
+endif()
+
+if (USE_HTTP_SERVER)
+  set(USE_JSON_API ON)
+  string(APPEND CMAKE_CXX_FLAGS " -DUSE_HTTP")
+endif()
+
+if (USE_JSON_API)
+  string(APPEND CMAKE_CXX_FLAGS " -DUSE_JSON_API")
+endif()
+
 # configure a header file to pass some of the CMake settings
 # to the source code
 configure_file (
@@ -95,22 +114,26 @@ endif()
 find_package(Boost 1.54 REQUIRED COMPONENTS filesystem thread system iostreams)
 
 # annoy
-if (USE_SIMSEARCH)
-  message(STATUS "Fetching Annoy")
-  add_definitions(-DUSE_SIMSEARCH)
-  ExternalProject_Add(
-    annoy
-    PREFIX annoy
-    INSTALL_DIR ${CMAKE_BINARY_DIR}
-    DOWNLOAD_COMMAND git clone https://github.com/spotify/annoy.git
-    CONFIGURE_COMMAND python setup.py build
-    BUILD_COMMAND ""
-    INSTALL_COMMAND ""
-    BUILD_IN_SOURCE 1
-    )
-
-  set(ANNOY_INCLUDE_DIR ${CMAKE_BINARY_DIR}/annoy/src/annoy/src/)
-  include_directories("${ANNOY_INCLUDE_DIR}")
+if (USE_CAFFE)
+  if (USE_SIMSEARCH)
+    message(STATUS "Fetching Annoy")
+    add_definitions(-DUSE_SIMSEARCH)
+    ExternalProject_Add(
+      annoy
+      PREFIX annoy
+      INSTALL_DIR ${CMAKE_BINARY_DIR}
+      DOWNLOAD_COMMAND git clone https://github.com/spotify/annoy.git
+      CONFIGURE_COMMAND python setup.py build
+      BUILD_COMMAND ""
+      INSTALL_COMMAND ""
+      BUILD_IN_SOURCE 1
+      )
+    
+    set(ANNOY_INCLUDE_DIR ${CMAKE_BINARY_DIR}/annoy/src/annoy/src/)
+    include_directories("${ANNOY_INCLUDE_DIR}")
+  endif()
+else()
+  set(USE_SIMSEARCH OFF)
 endif()
   
 # optional packages
@@ -220,6 +243,9 @@ if (USE_CAFFE2)
     ${CAFFE2_PATCHES}/detectron/0002-compiled.patch
     ${CAFFE2_PATCHES}/detectron/0003-ops.patch
     ${CAFFE2_PATCHES}/detectron/0004-import.patch
+    ${CAFFE2_PATCHES}/detectron/0005-visual_genome.patch
+    ${CAFFE2_PATCHES}/detectron/0006-pkl_cache.patch
+    ${CAFFE2_PATCHES}/detectron/0007-weight_transfer.patch
     )
 
   list(APPEND CAFFE2_OPS
@@ -511,9 +537,8 @@ if (USE_NCNN)
       ncnn
       PREFIX ncnn
       INSTALL_DIR ${CMAKE_BINARY_DIR}
-      DOWNLOAD_COMMAND git clone --recursive https://github.com/Tencent/ncnn.git
-      PATCH_COMMAND git reset --hard ${NCNN_COMMIT_HASH}
-      CONFIGURE_COMMAND mkdir -p build && cd build && cmake .. -DPI3=ON -DCMAKE_TOOLCHAIN_FILE=../pi3.toolchain.cmake
+      DOWNLOAD_COMMAND git clone --recursive https://github.com/jolibrain/ncnn.git
+      CONFIGURE_COMMAND mkdir -p build && cd build && cmake .. -DPI3=ON -DCMAKE_TOOLCHAIN_FILE=../toolchains/pi3.toolchain.cmake
       BUILD_COMMAND cd build/ && make -j${N}
       INSTALL_COMMAND ""
       BUILD_IN_SOURCE 1
@@ -523,8 +548,7 @@ if (USE_NCNN)
       ncnn
       PREFIX ncnn
       INSTALL_DIR ${CMAKE_BINARY_DIR}
-      DOWNLOAD_COMMAND git clone --recursive https://github.com/Tencent/ncnn.git
-      PATCH_COMMAND git reset --hard ${NCNN_COMMIT_HASH}
+      DOWNLOAD_COMMAND git clone --recursive https://github.com/jolibrain/ncnn.git
       CONFIGURE_COMMAND mkdir -p build && cd build && cmake ..
       BUILD_COMMAND cd build/ && make -j${N}
       INSTALL_COMMAND ""
@@ -550,7 +574,7 @@ if (USE_XGBOOST)
       PREFIX xgboost
       INSTALL_DIR ${CMAKE_BINARY_DIR}
       DOWNLOAD_COMMAND git clone --recursive https://github.com/dmlc/xgboost.git
-      CONFIGURE_COMMAND wget https://github.com/NVlabs/cub/archive/1.6.4.zip && unzip 1.6.4.zip && rm 1.6.4.zip && mkdir -p build && cd build &&
+      CONFIGURE_COMMAND git checkout 84d992babcc370bff6cf4fe89985f072b0b91a64 && wget https://github.com/NVlabs/cub/archive/1.6.4.zip && unzip 1.6.4.zip && rm 1.6.4.zip && mkdir -p build && cd build &&
       cmake .. -DPLUGIN_UPDATER_GPU=ON -DCUB_DIRECTORY=${CMAKE_BINARY_DIR}/xgboost/src/xgboost/cub-1.6.4/ -DCUDA_NVCC_FLAGS=-Xcompiler\ -fPIC\ --expt-extended-lambda\ -gencode\ arch=compute_30,code=compute_30\ -gencode\ arch=compute_35,code=compute_35\ -gencode\ arch=compute_50,code=compute_50\ -gencode\ arch=compute_52,code=compute_52\ -gencode\ arch=compute_61,code=compute_61 && make && make
       INSTALL_COMMAND ""
       BUILD_IN_SOURCE 1
@@ -561,7 +585,7 @@ if (USE_XGBOOST)
       PREFIX xgboost
       INSTALL_DIR ${CMAKE_BINARY_DIR}
       DOWNLOAD_COMMAND git clone --recursive https://github.com/dmlc/xgboost.git
-      CONFIGURE_COMMAND mkdir build && cd build && cmake .. && make -j ${N}
+      CONFIGURE_COMMAND git checkout 84d992babcc370bff6cf4fe89985f072b0b91a64 && mkdir build && cd build && cmake .. && make -j ${N}
       INSTALL_COMMAND ""
       BUILD_IN_SOURCE 1
       )

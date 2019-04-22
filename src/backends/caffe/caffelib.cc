@@ -25,6 +25,7 @@
 #include "generators/net_caffe.h"
 #include "generators/net_caffe_convnet.h"
 #include "generators/net_caffe_resnet.h"
+#include "generators/net_caffe_recurrent.h"
 #include "utils/fileops.hpp"
 #include "utils/utils.hpp"
 #include "utils/apitools.h"
@@ -58,6 +59,7 @@ namespace dd
     _nclasses = cl._nclasses;
     _regression = cl._regression;
     _ntargets = cl._ntargets;
+    //    _targets = cl._targets;
     _autoencoder = cl._autoencoder;
     cl._net = nullptr;
     _crop_size = cl._crop_size;
@@ -151,7 +153,7 @@ namespace dd
     this->_logger->info("dest={}",this->_mlmodel._repo + '/' + model_tmpl + ".prototxt");
     std::string dest_net = this->_mlmodel._repo + '/' + model_tmpl + ".prototxt";
     std::string dest_deploy_net = this->_mlmodel._repo + "/deploy.prototxt";
-    if (model_tmpl != "mlp" && model_tmpl != "convnet" && model_tmpl != "resnet")
+    if (model_tmpl != "mlp" && model_tmpl != "convnet" && model_tmpl != "resnet" && model_tmpl != "recurrent")
       {
 	int err = fileops::copy_file(source + model_tmpl + ".prototxt", dest_net);
 	if (err == 1)
@@ -200,7 +202,15 @@ namespace dd
     else if (model_tmpl.find("ssd")!=std::string::npos
 	     || model_tmpl.find("refinedet")!=std::string::npos)
       {
-	configure_ssd_template(dest_net,dest_deploy_net,ad);
+	bool refinedet = (model_tmpl.find("refinedet")!=std::string::npos);
+	configure_ssd_template(dest_net,dest_deploy_net,ad,refinedet);
+      }
+    else if (model_tmpl.find("recurrent") != std::string::npos)
+      {
+        caffe::NetParameter net_param,deploy_net_param;
+        configure_recurrent_template(ad,this->_inputc,net_param,deploy_net_param);
+        caffe::WriteProtoToTextFile(net_param,dest_net);
+        caffe::WriteProtoToTextFile(deploy_net_param,dest_deploy_net);
       }
     else
       {
@@ -208,25 +218,19 @@ namespace dd
 	caffe::ReadProtoFromTextFile(dest_net,&net_param); //TODO: catch parsing error (returns bool true on success)
 	caffe::ReadProtoFromTextFile(dest_deploy_net,&deploy_net_param);
 
-       if (this->_loss.compare(0, 4, "dice",0,4) == 0)
+       if (this->_loss == "dice")
       // dice loss!!
       {
-        int ignore_label = -1;
-        if (ad.has("ignore_label"))
-          ignore_label = ad.get("ignore_label").get<int>();
-
         if (net_param.name().compare("deeplab_vgg16")==0
 	    || net_param.name().compare("pspnet_vgg16")==0
 	    || net_param.name().compare("pspnet_50")==0
 	    || net_param.name().compare("pspnet_101")==0)
           {
-            update_protofiles_dice_one_hot(net_param, this->_loss, _nclasses);
-            update_protofiles_dice_deeplab_vgg16(net_param, deploy_net_param, this->_loss, ignore_label);
+            update_protofiles_dice_deeplab_vgg16(net_param, deploy_net_param, ad);
 	  }
         else if (net_param.name().compare("unet") == 0)
           {
-            update_protofiles_dice_one_hot(net_param, this->_loss, _nclasses);
-            update_protofiles_dice_unet(net_param,deploy_net_param, this->_loss, ignore_label);
+            update_protofiles_dice_unet(net_param,deploy_net_param, ad);
 	  }
 
       }
@@ -684,7 +688,8 @@ namespace dd
   template <class TInputConnectorStrategy, class TOutputConnectorStrategy, class TMLModel>
   void CaffeLib<TInputConnectorStrategy,TOutputConnectorStrategy,TMLModel>::configure_ssd_template(const std::string &dest_net,
 												   const std::string &dest_deploy_net,
-												   const APIData &ad)
+												   const APIData &ad,
+												   const bool &refinedet)
   {
     //- load prototxt
     caffe::NetParameter net_param,deploy_net_param;
@@ -723,9 +728,9 @@ namespace dd
 	      }
 	  }
 	//- set correct layer parameters based on nclasses
-	if (lparam->name() == "mbox_loss" || lparam->name() == "odm_loss" || lparam->name() == "arm_loss")
+	if (lparam->name() == "mbox_loss" || lparam->name() == "odm_loss")
 	  {
-	    lparam->mutable_multibox_loss_param()->set_num_classes(_nclasses);
+	      lparam->mutable_multibox_loss_param()->set_num_classes(_nclasses);
 	  }
 	else if (lparam->name() == "detection_out")
 	  {
@@ -736,8 +741,7 @@ namespace dd
 	    lparam->mutable_detection_evaluate_param()->set_num_classes(_nclasses);
 	  }
 	else if (lparam->name().find("mbox_conf_reshape") != std::string::npos
-		 || lparam->name().find("odm_conf_reshape") != std::string::npos
-		 || lparam->name().find("arm_conf_reshape") != std::string::npos)
+		 || lparam->name().find("odm_conf_reshape") != std::string::npos)
 	  {
 	    lparam->mutable_reshape_param()->mutable_shape()->set_dim(2,_nclasses);
 	  }
@@ -747,8 +751,14 @@ namespace dd
     for (int l=0;l<k;l++)
       {
 	caffe::LayerParameter *lparam = net_param.mutable_layer(l);
-	if (lparam->name().find("mbox_conf") != std::string::npos
+	if (!refinedet && lparam->name().find("mbox_conf") != std::string::npos
 	    && lparam->type() == "Convolution")
+	  {
+	    int num_priors_per_location = lparam->mutable_convolution_param()->num_output() / 2;
+	    lparam->mutable_convolution_param()->set_num_output(num_priors_per_location * _nclasses);
+	  }
+	else if (refinedet && lparam->name().find("mbox_conf") != std::string::npos
+		 && lparam->name()[0] == 'P' && lparam->type() == "Convolution")
 	  {
 	    int num_priors_per_location = lparam->mutable_convolution_param()->num_output() / 2;
 	    lparam->mutable_convolution_param()->set_num_output(num_priors_per_location * _nclasses);
@@ -784,8 +794,14 @@ namespace dd
 	      }
 	  }
 	//- set correct layer parameters based on nclasses
-	if (lparam->name().find("mbox_conf") != std::string::npos
+	if (!refinedet && lparam->name().find("mbox_conf") != std::string::npos
 	    && lparam->type() == "Convolution")
+	  {
+	    int num_priors_per_location = lparam->mutable_convolution_param()->num_output() / 2;
+	    lparam->mutable_convolution_param()->set_num_output(num_priors_per_location * _nclasses);
+	  }
+	else if (refinedet && lparam->name().find("mbox_conf") != std::string::npos
+		 && lparam->name()[0] == 'P' && lparam->type() == "Convolution")
 	  {
 	    int num_priors_per_location = lparam->mutable_convolution_param()->num_output() / 2;
 	    lparam->mutable_convolution_param()->set_num_output(num_priors_per_location * _nclasses);
@@ -795,8 +811,7 @@ namespace dd
 	    lparam->mutable_detection_output_param()->set_num_classes(_nclasses);
 	  }
 	else if (lparam->name().find("mbox_conf_reshape") != std::string::npos
-		 || lparam->name().find("odm_conf_reshape") != std::string::npos
-		 || lparam->name().find("arm_conf_reshape") != std::string::npos)
+		 || lparam->name().find("odm_conf_reshape") != std::string::npos)
 	  {
 	    lparam->mutable_reshape_param()->mutable_shape()->set_dim(2,_nclasses);
 	  }
@@ -806,7 +821,25 @@ namespace dd
     caffe::WriteProtoToTextFile(net_param,dest_net);
     caffe::WriteProtoToTextFile(deploy_net_param,dest_deploy_net);
   }
-  
+
+
+  template <class TInputConnectorStrategy, class TOutputConnectorStrategy, class TMLModel>
+  void CaffeLib<TInputConnectorStrategy,TOutputConnectorStrategy,TMLModel>::configure_recurrent_template(const APIData &ad,
+                                                                                                   const TInputConnectorStrategy &inputc,
+                                                                                                   caffe::NetParameter &net_param,
+                                                                                                         caffe::NetParameter &dnet_param)
+  {
+
+    NetCaffe<NetInputCaffe<TInputConnectorStrategy>,NetLayersCaffeRecurrent,NetLossCaffe> netcaffe(&net_param,&dnet_param,this->_logger);
+    netcaffe._nic.configure_inputs(ad,inputc);
+    // add ntargets to ad.
+    const_cast<APIData&>(ad).add("ntargets",this->_ntargets);
+    netcaffe._nlac.configure_net(ad);
+    // will be changed at predict time
+    // small default for debug
+    dnet_param.mutable_layer(0)->mutable_memory_data_param()->set_channels(10);
+  }
+
   template <class TInputConnectorStrategy, class TOutputConnectorStrategy, class TMLModel>
   int CaffeLib<TInputConnectorStrategy,TOutputConnectorStrategy,TMLModel>::create_model(const bool &test)
   {
@@ -841,7 +874,7 @@ namespace dd
 	  }
 	try
 	  {
-	    model_complexity(_flops,_params);
+             model_complexity(this->_model_flops,this->_model_params);
 	  }
 	catch(std::exception &e)
 	  {
@@ -900,13 +933,15 @@ namespace dd
     if (ad.has("loss"))
       {
         _loss = ad.get("loss").get<std::string>();
-        if (this->_loss.compare(0, 4, "dice",0,4) == 0)
+        if (this->_loss == "dice")
           if (! this->_inputc._segmentation)
             throw MLLibBadParamException("asked for  dice loss without segmentation");
       }
 
     if (ad.has("ntargets"))
       _ntargets = ad.get("ntargets").get<int>();
+    if (this->_inputc._ntargets != -1)
+      _ntargets = this->_inputc._ntargets;
     if (ad.has("autoencoder") && ad.get("autoencoder").get<bool>())
       _autoencoder = true;
     if (!_autoencoder && _nclasses == 0)
@@ -924,12 +959,13 @@ namespace dd
       instantiate_template(ad);
     else // model template instantiation is defered until training call
       {
+
 	update_deploy_protofile_softmax(ad); // temperature scaling
 	create_model(true);
       }
 
     // the first present measure will be used to snapshot best model
-    _best_metrics = {"map", "meaniou", "mlacc", "delta_score_0.1", "bacc", "f1", "net_meas", "acc"};
+    _best_metrics = {"map", "meaniou", "mlacc", "delta_score_0.1", "bacc", "f1", "net_meas", "acc", "L1_mean_error", "eucll"};
     _best_metric_value = std::numeric_limits<double>::infinity();
 
     // import model from existing directory upon request
@@ -958,6 +994,16 @@ namespace dd
 	throw MLLibBadParamException("missing solver file in " + this->_mlmodel._repo);
       }
 
+
+    APIData ad_mllib = ad.getobj("parameters").getobj("mllib");
+    int timesteps = 0;
+    if (ad_mllib.has("timesteps"))
+      timesteps = ad_mllib.get("timesteps").get<int>();
+    if (timesteps <= 0 && this->_inputc._ctc)
+      throw MLLibBadParamException("Need to specify timesteps > 0 with sequence (e.g. OCR / CTC) models");
+    if  (timesteps <= 0 && typeid(this->_inputc) == typeid(CSVTSCaffeInputFileConn))
+      throw MLLibBadParamException("Need to specify timesteps > 0 with recurrent  models");
+
     std::lock_guard<std::mutex> lock(_net_mutex); // XXX: not mandatory as train calls are locking resources from above
     TInputConnectorStrategy inputc(this->_inputc);
     this->_inputc._dv.clear();
@@ -972,6 +1018,8 @@ namespace dd
       cad.add("crop_size",_crop_size);
     if (_autoencoder)
       cad.add("autoencoder",_autoencoder);
+    if (typeid(this->_inputc) == typeid(CSVTSCaffeInputFileConn))
+        inputc._timesteps = timesteps;
     try
       {
 	inputc.transform(cad);
@@ -983,7 +1031,6 @@ namespace dd
     
     // instantiate model template here, as a defered from service initialization
     // since inputs are necessary in order to fit the inner net input dimension.
-    APIData ad_mllib = ad.getobj("parameters").getobj("mllib");
     if (!this->_mlmodel._model_template.empty())
       {
 	// modifies model structure, template must have been copied at service creation with instantiate_template
@@ -991,15 +1038,12 @@ namespace dd
 	int ignore_label = -1;
 	if (ad_mllib.has("ignore_label"))
 	  ignore_label = ad_mllib.get("ignore_label").get<int>();
-	int timesteps = 0;
-	if (ad_mllib.has("timesteps"))
-	  timesteps = ad_mllib.get("timesteps").get<int>();
-	if (timesteps == 0 && inputc._ctc)
-	  throw MLLibBadParamException("Need to specify timesteps > 0 with sequence (e.g. OCR / CTC) models");
 	update_protofile_net(this->_mlmodel._repo + '/' + this->_mlmodel._model_template + ".prototxt",
-			     this->_mlmodel._repo + "/deploy.prototxt",
-			     inputc, has_class_weights, ignore_label, timesteps);
+                            this->_mlmodel._repo + "/deploy.prototxt",
+                            inputc, has_class_weights, ignore_label, timesteps);
       }
+
+
     create_model(); // creates initial net.
 
     caffe::SolverParameter solver_param;
@@ -1009,7 +1053,7 @@ namespace dd
     int user_batch_size, batch_size, test_batch_size, test_iter;
     update_in_memory_net_and_solver(solver_param,cad,inputc,has_mean_file,user_batch_size,batch_size,test_batch_size,test_iter);
     //caffe::ReadProtoFromTextFile(this->_mlmodel._solver,&solver_param);
-    
+
     // parameters
 #if !defined(CPU_ONLY) && !defined(USE_CAFFE_CPU_ONLY)
     bool gpu = _gpu;
@@ -1245,10 +1289,15 @@ namespace dd
 	  _syncs[i]->StartInternalThread();
       }
 
+    this->_mem_used_train = solver->net_->memory_used();
+    for (caffe::shared_ptr<caffe::Net<float > > n: solver->test_nets())
+      this->_mem_used_test+= n->memory_used();
+
     const int start_iter = solver->iter_;
     int average_loss = solver->param_.average_loss();
     std::vector<float> losses;
-    this->clear_all_meas_per_iter();
+    if (!ad_mllib.has("resume") || !ad_mllib.get("resume").get<bool>())
+      this->clear_all_meas_per_iter();
     float smoothed_loss = 0.0;
     while(solver->iter_ < solver->param_.max_iter()
 	  && this->_tjob_running.load())
@@ -1270,7 +1319,7 @@ namespace dd
 	    APIData meas_out;
 	    solver->test_nets().at(0).get()->ShareTrainedLayersWith(solver->net().get());
 	    test(solver->test_nets().at(0).get(),ad,inputc,test_batch_size,has_mean_file,test_iter,meas_out);
-	    APIData meas_obj = meas_out.getobj("measure");
+           APIData meas_obj = meas_out.getobj("measure");
 
 	    // save best iteration snapshot
 	    save_if_best(meas_obj, solver, already_snapshoted);
@@ -1280,14 +1329,14 @@ namespace dd
 	    
 	    for (auto m: meas_str)
 	      {
-		if (m != "cmdiag" && m != "cmfull" && m != "clacc" && m != "labels") // do not report confusion matrix in server logs
+		if (m != "cmdiag" && m != "cmfull" && m != "clacc" && m != "labels" && m!= "cliou") // do not report confusion matrix in server logs
 		  {
 		    double mval = meas_obj.get(m).get<double>();
 		    this->_logger->info("{}={}",m,mval);
 		    this->add_meas(m,mval);
 		    this->add_meas_per_iter(m,mval);
 		  }
-		else if (m == "cmdiag" || m == "clacc")
+		else if (m == "cmdiag" || m == "clacc" || m == "cliou")
 		  {
 		    std::vector<double> mdiag = meas_obj.get(m).get<std::vector<double>>();
 		    std::vector<std::string> cnames;
@@ -1500,7 +1549,7 @@ namespace dd
 	    std::vector<std::vector<double>> dv_float_data;
 	    try
 	      {
-		if (inputc._ctc || inputc._bbox)
+               if (inputc._ctc || inputc._bbox)
 		  {
 		    // do nothing, db input
 		    dv_size = test_batch_size;
@@ -1538,6 +1587,18 @@ namespace dd
 			      vals.push_back(dv.at(s).float_data(k));
 			    dv_float_data.push_back(vals);
 			  }
+                     else if (typeid(inputc) == typeid(CSVTSCaffeInputFileConn))  // timeseries case
+                       {
+			    std::vector<double> vals;
+                         for (int t=0; t<inputc._timesteps; ++t)
+                           {
+                             for (int k=0; k<_ntargets; ++k)
+                               {
+                                 vals.push_back(dv.at(s).float_data(t*inputc._datadim+k+1));
+                               }
+                           }
+			    dv_float_data.push_back(vals);
+                       }
 			else if (!_autoencoder)
 			  {
 			    dv_labels.push_back(dv.at(s).label());
@@ -1638,9 +1699,13 @@ namespace dd
 	      slot = 0; // flatten output
            else if (_regression && _ntargets == 1 && typeid(inputc) == typeid(CSVCaffeInputFileConn))
              {
-               slot = findOutputSlotNumberByBlobName(net, "ip_losst");
+               slot = findOutputSlotNumberByBlobName(net, "ip_loss");
              }
 
+           if (typeid(inputc) == typeid(CSVTSCaffeInputFileConn))
+             {
+               slot = findOutputSlotNumberByBlobName(net,"rnn_pred");
+             }
 
 	    int scount = lresults[slot]->count();
 	    int scperel = scount / dv_size;
@@ -1835,6 +1900,24 @@ namespace dd
 			bad.add("target",targets);
 			bad.add("pred",predictions);
 		      }
+                  else if (typeid(inputc) == typeid(CSVTSCaffeInputFileConn))
+                    {
+                      std::vector<double> target;
+                      for (size_t k=0;k<dv_float_data.at(j).size();k++)
+                        {
+                          target.push_back(dv_float_data.at(j).at(k));
+                        }
+                      bad.add("target", target);
+
+                      for (int t=0; t<inputc._timesteps; ++t)
+                        {
+                          for (int k=0;k<nout;k++)
+                            {
+                              std::vector<int> loc = {t,j,k};
+                              predictions.push_back(lresults[slot]->data_at(loc));
+                            }
+                        }
+                    }
 		    else if ((!_regression && !_autoencoder)|| _ntargets == 1)
 		      {
 			double target = dv_labels.at(j);
@@ -1882,6 +1965,11 @@ namespace dd
 	  ad_res.add("regression",_regression);
 	if (inputc._ctc)
 	  ad_res.add("net_meas",true);
+       if (typeid(inputc) == typeid(CSVTSCaffeInputFileConn))
+         {
+           ad_res.add("timeserie",true);
+           ad_res.add("timeseries",nout);
+         }
       }
     SupervisedOutput::measure(ad_res,ad_out,out);
   }
@@ -1891,6 +1979,7 @@ namespace dd
 										   APIData &out)
   {
     std::lock_guard<std::mutex> lock(_net_mutex); // no concurrent calls since the net is not re-instantiated
+
 
     // check for net
     if (!_net || _net->phase() == caffe::TRAIN)
@@ -1927,6 +2016,27 @@ namespace dd
 	    confidence_threshold = static_cast<double>(ad_output.get("confidence_threshold").get<int>());
 	  }
       }
+
+
+    if (typeid(inputc) == typeid(CSVTSCaffeInputFileConn)
+        && ad.getobj("parameters").getobj("input").has("timesteps"))
+      {
+        int timesteps = ad.getobj("parameters").getobj("input").get("timesteps").get<int>();
+
+        bool changed = update_timesteps(timesteps);
+        if (changed)
+          {
+            int cm = create_model(true);
+            if (cm != 0)
+              this->_logger->error("Error creating model for prediction");
+            if (cm == 1)
+              throw MLLibInternalException("no model in " + this->_mlmodel._repo + " for initializing the net");
+            else if (cm == 2)
+              throw MLLibBadParamException("no deploy file in " + this->_mlmodel._repo + " for initializing the net");
+          }
+      }
+
+
     if (ad_output.has("bbox") && ad_output.get("bbox").get<bool>())
       bbox = true;
     if (ad_output.has("rois")) {
@@ -2024,15 +2134,36 @@ namespace dd
     std::vector<APIData> vrad;
     int nclasses = -1;
     int idoffset = 0;
+    std::vector<APIData> series;
+    int serieNum = 0;
+
     while(true)
       {
 	try
 	  {
-	    if (!inputc._sparse)
+           if (!inputc._sparse)
 	      {
 		std::vector<Datum> dv = inputc.get_dv_test(batch_size,has_mean_file);
 		if (dv.empty())
-		  break;
+                {
+                  if (typeid(inputc) == typeid(CSVTSCaffeInputFileConn)) // timeseries
+                    // in case of time series, need to output data of last serie at end
+                    {
+                      if (series.size() > 0)
+                        {
+                          APIData out;
+                          if (!inputc._ids.empty())
+                            out.add("uri",inputc._ids.at(serieNum++));
+                          else out.add("uri",std::to_string(serieNum++));
+                          out.add("series", series);
+                          out.add("probs",std::vector<double>(series.size(),1.0));
+                          out.add("loss",0.0);
+                          vrad.push_back(out);
+                        }
+                      series.clear();
+                    }
+                  break;
+                }
 		batch_size = dv.size();
 		if (boost::dynamic_pointer_cast<caffe::MemoryDataLayer<float>>(_net->layers()[0]) == 0)
 		    {
@@ -2068,7 +2199,9 @@ namespace dd
 	    _net = nullptr;
 	    throw;
 	  }
-	
+
+       this->_mem_used_test = _net->memory_used();
+
 	float loss = 0.0;
 	if (extract_layer.empty() || inputc._segmentation) // supervised or segmentation
 	  {
@@ -2112,8 +2245,29 @@ namespace dd
 	    
 	    if (inputc._segmentation)
 	      {
-		int slot = results.size() - 1;
-		nclasses = _nclasses;
+               int slot = results.size() - 1;
+               nclasses = _nclasses;
+
+               bool conf_best = false;
+               std::vector<bool> confidences;
+               if (_nclasses == 1)
+                 confidences = std::vector<bool>(2,false);
+               else
+                 confidences = std::vector<bool>(_nclasses,false);
+               if (ad_output.has("confidences"))
+                 {
+                   std::vector<std::string> smaps =
+                     ad_output.get("confidences").get<std::vector<std::string>>();
+                   for (std::string s: smaps)
+                     if (s == "all")
+                       for (int ci = 0; ci<_nclasses; ++ci)
+                         confidences[ci] = true;
+                     else if (s=="best")
+                       conf_best = true;
+                     else
+                       confidences[std::stoi(s)]= true;
+                 }
+
 		for (int j=0;j<batch_size;j++)
 		  {
 		    APIData rad;
@@ -2130,6 +2284,8 @@ namespace dd
 		      }
 		    rad.add("loss",loss);
 		    std::vector<double> vals;
+                  std::map<int,std::vector<double>> confidence_maps;
+                  std::vector<double> conf_map_best;
 		    int imgsize = inputc.width()*inputc.height();
 		    for (int i=0;i<imgsize;i++)
 		      {
@@ -2140,20 +2296,36 @@ namespace dd
 			    for (int k=0;k<nclasses;k++)
 			      {
 				double prob = results[slot]->cpu_data()[(j*nclasses+k)*imgsize+i];
+                            if (confidences[k])
+                              confidence_maps[k].push_back(prob);
 				if (prob > max_prob)
 				  {
 				    max_prob = prob;
 				    best_cat = static_cast<double>(k);
 				  }
 			      }
+                         if (conf_best)
+                           conf_map_best.push_back(max_prob);
 			  }
 			else
 			  {
 			    double prob = results[slot]->cpu_data()[(j)*imgsize+i];
+                         if (confidences[1])
+                           confidence_maps[1].push_back(prob);
+                         if (confidences[0])
+                           confidence_maps[0].push_back(1.0-prob);
 			    if (prob > 0.5)
-			      best_cat = 1;
+                           {
+                             if (conf_best)
+                               conf_map_best.push_back(prob);
+                             best_cat = 1;
+                           }
 			    else
-			      best_cat = 0;
+                           {
+                             if (conf_best)
+                               conf_map_best.push_back(1.0-prob);
+                             best_cat = 0;
+                           }
 			  }
 			vals.push_back(best_cat);
 		      }
@@ -2164,13 +2336,28 @@ namespace dd
 		    rad.add("imgsize",ad_imgsize);
 		    if (imgsize != (*bit).second.first*(*bit).second.second) // resizing output segmentation array
 		      {
-			cv::Mat segimg = cv::Mat(inputc.height(),inputc.width(), CV_64FC1);
-			std::memcpy(segimg.data,vals.data(),vals.size()*sizeof(double));
-			cv::Mat segimg_res;
-			cv::resize(segimg,segimg_res,cv::Size((*bit).second.second,(*bit).second.first),0,0,cv::INTER_NEAREST);
-			vals = std::vector<double>((double*)segimg_res.data,(double*)segimg_res.data+segimg_res.rows*segimg_res.cols);
+                      vals =img_resize(vals,inputc.height(),inputc.width(),(*bit).second.first, (*bit).second.second,true);
+                     if (conf_best)
+                       conf_map_best = img_resize(conf_map_best, inputc.height(), inputc.width(),
+                                                  (*bit).second.first, (*bit).second.second,false);
+                     for (int ci=0; ci <_nclasses; ++ci)
+                       if (confidences[ci])
+                       confidence_maps[ci] =
+                         img_resize(confidence_maps[ci],
+                                    inputc.height(), inputc.width(),
+                                     (*bit).second.first, (*bit).second.second, false);
 		      }
 		    rad.add("vals",vals);
+                  if (conf_best || !confidence_maps.empty())
+                    {
+                      APIData confs;
+                      if (conf_best)
+                        confs.add("best", conf_map_best);
+                      for (int ci=0; ci < _nclasses; ++ci)
+                        if (confidences[ci])
+                          confs.add(std::to_string(ci), confidence_maps[ci]);
+                      rad.add("confidences",confs);
+                    }
 		    vrad.push_back(rad);
 		  }
 	      }
@@ -2363,6 +2550,64 @@ namespace dd
 		  vrad.push_back(outseq);
 		}
 	    }
+           else if (typeid(inputc) == typeid(CSVTSCaffeInputFileConn)) // timeseries
+             {
+               int slot = findOutputSlotNumberByBlobName(_net,"rnn_pred");
+               //results[slot] is TxNxDataDim , N is batchsize ...
+               int nout = _ntargets;
+
+               const boost::shared_ptr<Blob<float>> contseq = _net->blob_by_name("cont_seq");
+               //cont_seq is TxN
+
+               CSVTSCaffeInputFileConn* ic =
+                 reinterpret_cast<CSVTSCaffeInputFileConn*>(&inputc);
+
+               for (int j=0; j<batch_size; ++j)
+                 {
+                   for (int t=0; t<ic->_timesteps; ++t)
+                     {
+                       std::vector<int> loc0 = {t,j};
+                       if (contseq->data_at(loc0) == 0 && series.size() != 0)
+                         // new seq -> push old one
+                         {
+                           if (series.size() > 0)
+                             {
+                               APIData out;
+                               if (!inputc._ids.empty())
+                                 out.add("uri",inputc._ids.at(serieNum++));
+                               else out.add("uri",std::to_string(serieNum++));
+                               out.add("series", series);
+                               out.add("probs",std::vector<double>(series.size(),1.0));
+                               out.add("loss",0.0);
+                               vrad.push_back(out);
+                             }
+                           series.clear();
+                         }
+
+                       std::vector<double> predictions;
+                       for (int k=0; k<nout; ++k)
+                         {
+                           std::vector<int> loc = {t,j,k};
+                           if (ic->_min_vals.empty() || ic->_max_vals.empty())
+                             {
+                               this->_logger->info("not unscaling output because no bounds data found");
+                               predictions.push_back(results[slot]->data_at(loc));
+                             }
+                           else
+                             {
+                               double res = results[slot]->data_at(loc);
+                               double max = ic->_max_vals[ic->_label_pos[k]];
+                               double min = ic->_min_vals[ic->_label_pos[k]];
+                               double unscaled_res = res * (max - min) + min;
+                               predictions.push_back(unscaled_res);
+                             }
+                         }
+                       APIData ts;
+                       ts.add("out", predictions);
+                       series.push_back(ts);
+                     }
+                 }
+             }
 	    else // classification
 	      {
 		int slot = results.size() - 1;
@@ -2458,6 +2703,10 @@ namespace dd
 	  {
 	    out.add("autoencoder",true);
 	  }
+       if (typeid(inputc) == typeid(CSVTSCaffeInputFileConn))
+         {
+           out.add("timeseries",true);
+         }
       }
     
     out.add("nclasses",nclasses);
@@ -2595,7 +2844,8 @@ namespace dd
 	else if (lp->has_memory_data_param())
 	  {
 	    caffe::MemoryDataParameter *mdp = lp->mutable_memory_data_param();
-	    if (mdp->has_batch_size() && batch_size != inputc.batch_size() && batch_size > 0)
+	    if (mdp->has_batch_size() && batch_size > 0 &&
+               ( (batch_size != inputc.batch_size()) || (typeid(inputc) == typeid(CSVTSCaffeInputFileConn)) ))
 	      {
 		if (i == 0) // training
 		  mdp->set_batch_size(batch_size);
@@ -2632,9 +2882,39 @@ namespace dd
 	      }
 	  }
       }
+
+    if (typeid(inputc) == typeid(CSVTSCaffeInputFileConn))
+      {
+        caffe::LayerParameter *loss_scale_layer_param = find_layer_by_name(*np,"Loss_Scale");
+        if (loss_scale_layer_param != NULL)
+          {
+            loss_scale_layer_param->mutable_scale_param()->mutable_filler()->
+              set_value(1.0/(float)_ntargets/(float)batch_size);
+          }
+      }
+
+
     //caffe::WriteProtoToTextFile(*np,sp.net().c_str());
     sp.clear_net();
   }
+
+
+  template <class TInputConnectorStrategy, class TOutputConnectorStrategy, class TMLModel>
+  bool CaffeLib<TInputConnectorStrategy,TOutputConnectorStrategy,TMLModel>::update_timesteps(int timesteps)
+  {
+    std::string deploy_file = this->_mlmodel._repo + "/deploy.prototxt";
+    caffe::NetParameter deploy_net_param;
+    caffe::ReadProtoFromTextFile(deploy_file,&deploy_net_param);
+
+    caffe::LayerParameter *lparam = deploy_net_param.mutable_layer(0);
+    int orig_timesteps = lparam->memory_data_param().channels();
+    if (orig_timesteps == timesteps)
+      return false;
+    lparam->mutable_memory_data_param()->set_channels(timesteps);
+    caffe::WriteProtoToTextFile(deploy_net_param,deploy_file);
+    return true;
+  }
+
 
   template <class TInputConnectorStrategy, class TOutputConnectorStrategy, class TMLModel>
   void CaffeLib<TInputConnectorStrategy,TOutputConnectorStrategy,TMLModel>::update_deploy_protofile_softmax(const APIData &ad)
@@ -2717,7 +2997,7 @@ namespace dd
     if (net_param.mutable_layer(0)->has_memory_data_param()
 	|| net_param.mutable_layer(1)->has_memory_data_param())
       {
-	if (_ntargets == 0 || _ntargets == 1)
+        if (_ntargets == 0 || _ntargets == 1 || (typeid(this->_inputc) == typeid(CSVTSCaffeInputFileConn)))
 	  {
 	    if (net_param.mutable_layer(0)->has_memory_data_param())
 	      {
@@ -2857,7 +3137,7 @@ namespace dd
     if (deploy_net_param.mutable_layer(0)->has_memory_data_param())
       {
 	// no batch size set on deploy model since it is adjusted for every prediction batch
-	if (_ntargets == 0 || _ntargets == 1)
+        if (_ntargets == 0 || _ntargets == 1  || (typeid(this->_inputc) == typeid(CSVTSCaffeInputFileConn)))
 	  {
 	    deploy_net_param.mutable_layer(0)->mutable_memory_data_param()->set_channels(inputc.channels());
 	    deploy_net_param.mutable_layer(0)->mutable_memory_data_param()->set_width(width);
@@ -2876,6 +3156,7 @@ namespace dd
 	if (_crop_size > 0)
 	  deploy_net_param.mutable_layer(0)->mutable_transform_param()->set_crop_size(_crop_size);
       }
+
     caffe::WriteProtoToTextFile(net_param,net_file);
     caffe::WriteProtoToTextFile(deploy_net_param,deploy_file);
   }
@@ -2897,7 +3178,7 @@ namespace dd
 	    if (lparam->has_convolution_param())
 	      {
             int num_output = lparam->mutable_convolution_param()->num_output();
-            if (_loss == "dice" && lparam->name() == "linear_aggregation" && num_output == 1)
+            if (_loss == "dice" && _nclasses <= 2 && lparam->name() == "linear_aggregation" && num_output == 1)
               continue;
             if (last_layer || num_output == 0)
               lparam->mutable_convolution_param()->set_num_output(_nclasses);
@@ -3158,12 +3439,15 @@ namespace dd
   
 
   template <class TInputConnectorStrategy, class TOutputConnectorStrategy, class TMLModel>
-  void CaffeLib<TInputConnectorStrategy,TOutputConnectorStrategy,TMLModel>::update_protofiles_dice_deeplab_vgg16(caffe::NetParameter &net_param,caffe::NetParameter &deploy_net_param, std::string loss, int ignore_label)
+  void CaffeLib<TInputConnectorStrategy,TOutputConnectorStrategy,TMLModel>::update_protofiles_dice_deeplab_vgg16(caffe::NetParameter &net_param,caffe::NetParameter &deploy_net_param, const APIData& ad)
   {
     caffe::LayerParameter *shrink_param = find_layer_by_name(net_param,"label_shrink");
     shrink_param->add_include();
     caffe::NetStateRule *nsr = shrink_param->mutable_include(0);
     nsr->set_phase(caffe::TRAIN);
+    caffe::InterpParameter *ip = shrink_param->mutable_interp_param();
+    ip->set_mode(caffe::InterpParameter::NEAREST);
+
 
     int softml_pos = find_index_layer_by_type(net_param,"SoftmaxWithLoss");
     std::string logits = net_param.layer(softml_pos).bottom(0);
@@ -3179,7 +3463,7 @@ namespace dd
     mvn_param->add_bottom(logits);
     mvn_param->add_top(logits_norm);
 
-    if (loss == "dice")
+    if (_nclasses <= 2)
       {
         caffe::LayerParameter* conv_param = insert_layer_before(net_param, softml_pos++);
         *conv_param->mutable_name() = "linear_aggregation";
@@ -3217,7 +3501,7 @@ namespace dd
 
 
     caffe::LayerParameter* final_interp_param = find_layer_by_name(net_param,"final_interp");
-    if (loss == "dice")
+    if (_nclasses <= 2)
       {
         *final_interp_param->mutable_bottom(0) = agg_output;
         caffe::LayerParameter* probt_param = find_layer_by_name(net_param, "probt");
@@ -3236,24 +3520,13 @@ namespace dd
     *lossparam->mutable_type() = "DiceCoefLoss";
     *lossparam->mutable_bottom(0) = loss_input;
     caffe::DiceCoefLossParameter* dclp = lossparam->mutable_dice_coef_loss_param();
-    if (ignore_label != -1 && loss != "dice")
-      dclp->set_ignore_label(ignore_label);
-    if (loss == "dice")
-      dclp->set_generalization(caffe::DiceCoefLossParameter::NONE);
-    else if (loss == "dice_multiclass")
-      dclp->set_generalization(caffe::DiceCoefLossParameter::MULTICLASS);
-    else if (loss == "dice_weighted")
-      dclp->set_generalization(caffe::DiceCoefLossParameter::MULTICLASS_WEIGHTED);
-    else if (loss == "dice_weighted_batch")
-      dclp->set_generalization(caffe::DiceCoefLossParameter::MULTICLASS_WEIGHTED_BATCH);
-    else if (loss == "dice_weighted_all")
-      dclp->set_generalization(caffe::DiceCoefLossParameter::MULTICLASS_WEIGHTED_ALL);
 
+    update_protofiles_dice_params(dclp, ad);
 
     // now work on deploy.txt
     int final_interp_pos = find_index_layer_by_type(deploy_net_param, "Interp");
     final_interp_param = deploy_net_param.mutable_layer(final_interp_pos);
-    if (loss == "dice")
+    if (_nclasses <= 2)
       *final_interp_param->mutable_bottom(0) = agg_output;
     else
       *final_interp_param->mutable_bottom(0) = logits_norm;
@@ -3266,7 +3539,7 @@ namespace dd
     mvn_param->add_top(logits_norm);
 
 
-    if (loss == "dice")
+    if (_nclasses <= 2)
       {
         caffe::LayerParameter *conv_param = insert_layer_before(deploy_net_param, final_interp_pos);
         *conv_param->mutable_name() = "linear_aggregation";
@@ -3291,18 +3564,129 @@ namespace dd
   }
 
   template <class TInputConnectorStrategy, class TOutputConnectorStrategy, class TMLModel>
-  void CaffeLib<TInputConnectorStrategy,TOutputConnectorStrategy,TMLModel>::update_protofiles_dice_one_hot(caffe::NetParameter &net_param, std::string loss, int nclasses)
+  void CaffeLib<TInputConnectorStrategy,TOutputConnectorStrategy,TMLModel>::update_protofiles_one_hot(caffe::NetParameter &net_param)
   {
-    if (loss.compare(0, 4, "dice",0,4) != 0)
-      return;
     caffe::LayerParameter* denseImageDataLayer = find_layer_by_type(net_param,"DenseImageData");
     caffe::DenseImageDataParameter *dp = denseImageDataLayer->mutable_dense_image_data_param();
-    dp->set_one_hot_nclasses(nclasses);
+    dp->set_one_hot_nclasses(_nclasses);
+  }
+
+
+    template <class TInputConnectorStrategy, class TOutputConnectorStrategy, class TMLModel>
+  void CaffeLib<TInputConnectorStrategy,TOutputConnectorStrategy,TMLModel>::update_protofiles_dice_params(caffe::DiceCoefLossParameter*dclp,  const APIData &ad)
+  {
+
+    caffe::DiceCoefLossParameter::GeneralizationMode genMode =
+      caffe::DiceCoefLossParameter::MULTICLASS;
+    caffe::DiceCoefLossParameter::WeightMode weightMode =
+      caffe::DiceCoefLossParameter::INVERSE_VOLUME;
+    caffe::DiceCoefLossParameter::ContourShape contours =
+      caffe::DiceCoefLossParameter::NO;
+    int contour_size = 7;
+    float contour_amplitude = 5.0;
+    if (ad.has("dice_param"))
+      {
+        APIData diceParams = ad.getobj("dice_param");
+        if (diceParams.has("class_weighting"))
+          {
+            APIData cwd = diceParams.getobj("class_weighting");
+            if (cwd.has("compute_on"))
+              {
+                std::string wm = cwd.get("compute_on").get<std::string>();
+                if (wm == "image")
+                  genMode = caffe::DiceCoefLossParameter::MULTICLASS_WEIGHTED;
+                else if (wm == "batch")
+                  genMode = caffe::DiceCoefLossParameter::MULTICLASS_WEIGHTED_BATCH;
+                else if (wm == "all")
+                  genMode = caffe::DiceCoefLossParameter::MULTICLASS_WEIGHTED_ALL;
+                else
+                  {
+                    this->_logger->warn("dice class weighting on {} unrecognized , setting to all",wm);
+                    genMode = caffe::DiceCoefLossParameter::MULTICLASS_WEIGHTED_ALL;
+                  }
+              }
+            if (cwd.has("weight"))
+              {
+                std::string wm = cwd.get("weight").get<std::string>();
+                if (wm == "equalize_classes")
+                  weightMode = caffe::DiceCoefLossParameter::EQUALIZE_CLASSES;
+                else if (wm == "extra_small_volumes")
+                  weightMode = caffe::DiceCoefLossParameter::EXTRA_SMALL_VOLUMES;
+                else if (wm == "inverse_volume")
+                  weightMode = caffe::DiceCoefLossParameter::INVERSE_VOLUME;
+                else
+                  {
+                    this->_logger->warn("dice weight mode {} unrecognized , setting to inverse volume",wm);
+                    weightMode = caffe::DiceCoefLossParameter::INVERSE_VOLUME;
+                  }
+              }
+          }
+
+
+        if (diceParams.has("contour"))
+          {
+            APIData contourdata = diceParams.getobj("contour");
+
+            if (contourdata.has("shape"))
+              {
+                std::string cs = contourdata.get("shape").get<std::string>();
+                if (cs == "simple")
+                  contours = caffe::DiceCoefLossParameter::SIMPLE;
+                else if (cs == "sharp")
+                  contours = caffe::DiceCoefLossParameter::SHARP;
+                else
+                  {
+                    this->_logger->warn("dice contour shape {} unrecognized , setting to sharp",cs);
+                    contours = caffe::DiceCoefLossParameter::SHARP;
+                  }
+              }
+            if (contourdata.has("size"))
+              {
+                try
+                  {
+                    contour_size = contourdata.get("size").get<int>();
+                  }
+                catch (std::exception &e)
+                  {
+                    this->_logger->warn("dice contour size unrecognized, (odd) int expected");
+                  }
+
+              }
+            if (contourdata.has("amplitude"))
+              {
+                try
+                  {
+                    contour_amplitude = contourdata.get("amplitude").get<double>();
+                  }
+                catch (std::exception &e)
+                  {
+                    this->_logger->warn("dice contour amplitude unrecognized, float expected");
+                  }
+              }
+          }
+      }
+
+
+    if (_nclasses <= 2)
+      dclp->set_generalization(caffe::DiceCoefLossParameter::NONE);
+    else
+      {
+        dclp->set_generalization(genMode);
+        if (genMode != caffe::DiceCoefLossParameter::MULTICLASS)
+          dclp->set_weight_mode(weightMode);
+      }
+
+    dclp->set_contour_shape(contours);
+    if (contours != caffe::DiceCoefLossParameter::NO)
+      {
+        dclp->set_contour_size(contour_size);
+        dclp->set_contour_amplitude(contour_amplitude);
+      }
   }
 
 
   template <class TInputConnectorStrategy, class TOutputConnectorStrategy, class TMLModel>
-  void CaffeLib<TInputConnectorStrategy,TOutputConnectorStrategy,TMLModel>::update_protofiles_dice_unet(caffe::NetParameter &net_param,caffe::NetParameter &deploy_net_param, std::string loss, int ignore_label)
+  void CaffeLib<TInputConnectorStrategy,TOutputConnectorStrategy,TMLModel>::update_protofiles_dice_unet(caffe::NetParameter &net_param,caffe::NetParameter &deploy_net_param,  const APIData&ad)
   {
     int softml_pos = find_index_layer_by_type(net_param,"SoftmaxWithLoss");
 
@@ -3319,7 +3703,7 @@ namespace dd
     mvn_param->add_top(logits_norm);
 
 
-    if (loss == "dice")
+    if (_nclasses <= 2)
       {
         caffe::LayerParameter* conv_param = insert_layer_before(net_param, softml_pos++);
         *conv_param->mutable_name() = "linear_aggregation";
@@ -3367,19 +3751,8 @@ namespace dd
     *lossparam->mutable_type() = "DiceCoefLoss";
     *lossparam->mutable_bottom(0) = loss_input;
     caffe::DiceCoefLossParameter* dclp = lossparam->mutable_dice_coef_loss_param();
-    dclp->set_generalization(caffe::DiceCoefLossParameter::NONE);
-    if (ignore_label != -1 && loss != "dice")
-      dclp->set_ignore_label(ignore_label);
-    if (loss == "dice")
-      dclp->set_generalization(caffe::DiceCoefLossParameter::NONE);
-    else if (loss == "dice_multiclass")
-      dclp->set_generalization(caffe::DiceCoefLossParameter::MULTICLASS);
-    else if (loss == "dice_weighted")
-      dclp->set_generalization(caffe::DiceCoefLossParameter::MULTICLASS_WEIGHTED);
-    else if (loss == "dice_weighted_batch")
-      dclp->set_generalization(caffe::DiceCoefLossParameter::MULTICLASS_WEIGHTED_BATCH);
-    else if (loss == "dice_weighted_all")
-      dclp->set_generalization(caffe::DiceCoefLossParameter::MULTICLASS_WEIGHTED_ALL);
+
+    update_protofiles_dice_params(dclp, ad);
 
     // BELOW DEPLOY
     int final_pred = find_index_layer_by_name(deploy_net_param, "pred");
@@ -3391,7 +3764,7 @@ namespace dd
     mvn_param->add_bottom(logits);
     mvn_param->add_top(logits_norm);
 
-    if (loss == "dice")
+    if (_nclasses <= 2)
       {
         caffe::LayerParameter* conv_param = insert_layer_before(deploy_net_param, final_pred);
         *conv_param->mutable_name() = "linear_aggregation";
@@ -3442,7 +3815,7 @@ namespace dd
   template <class TInputConnectorStrategy, class TOutputConnectorStrategy, class TMLModel>
   bool CaffeLib<TInputConnectorStrategy,TOutputConnectorStrategy,TMLModel>::is_better(double v1, double v2, std::string metric_name)
   {
-    if (metric_name == "eucll" || metric_name == "delta_score_0.1")
+    if (metric_name == "eucll" || metric_name == "delta_score_0.1" || metric_name == "L1_mean_error")
       return (v2 > v1);
     return (v1 > v2);
   }
@@ -3506,7 +3879,7 @@ namespace dd
   }
 
   template <class TInputConnectorStrategy, class TOutputConnectorStrategy, class TMLModel>
-  Blob<float>* CaffeLib<TInputConnectorStrategy,TOutputConnectorStrategy,TMLModel>::findOutputBlobByName(const caffe::Net<float> *net, const std::string blob_name)
+  boost::shared_ptr<Blob<float>> CaffeLib<TInputConnectorStrategy,TOutputConnectorStrategy,TMLModel>::findOutputBlobByName(const caffe::Net<float> *net, const std::string blob_name)
   {
     const std::vector<std::string> blob_names = net->blob_names();
     const std::vector<int> output_blob_indices = net->output_blob_indices();
@@ -3518,15 +3891,28 @@ namespace dd
     return nullptr;
   }
 
-
+  template <class TInputConnectorStrategy, class TOutputConnectorStrategy, class TMLModel>
+  std::vector<double> CaffeLib<TInputConnectorStrategy,TOutputConnectorStrategy,TMLModel>::img_resize(const std::vector<double>& vals, const int height_net, const int width_net, const int height_dest, const int width_dest, bool resize_nn)
+  {
+    cv::Mat segimg = cv::Mat(height_net,width_net, CV_64FC1);
+    std::memcpy(segimg.data,vals.data(),vals.size()*sizeof(double));
+    cv::Mat segimg_res;
+    if (resize_nn)
+      cv::resize(segimg,segimg_res,cv::Size(width_dest,height_dest),0,0,cv::INTER_NEAREST);
+    else
+      cv::resize(segimg,segimg_res,cv::Size(width_dest,height_dest),0,0,cv::INTER_LINEAR);
+    return std::vector<double>((double*)segimg_res.data,(double*)segimg_res.data+segimg_res.rows*segimg_res.cols);
+  }
 
   template class CaffeLib<ImgCaffeInputFileConn,SupervisedOutput,CaffeModel>;
   template class CaffeLib<VidCaffeInputConn,SupervisedOutput,CaffeModel>;
   template class CaffeLib<CSVCaffeInputFileConn,SupervisedOutput,CaffeModel>;
+  template class CaffeLib<CSVTSCaffeInputFileConn,SupervisedOutput,CaffeModel>;
   template class CaffeLib<TxtCaffeInputFileConn,SupervisedOutput,CaffeModel>;
   template class CaffeLib<SVMCaffeInputFileConn,SupervisedOutput,CaffeModel>;
   template class CaffeLib<ImgCaffeInputFileConn,UnsupervisedOutput,CaffeModel>;
   template class CaffeLib<CSVCaffeInputFileConn,UnsupervisedOutput,CaffeModel>;
+  template class CaffeLib<CSVTSCaffeInputFileConn,UnsupervisedOutput,CaffeModel>;
   template class CaffeLib<TxtCaffeInputFileConn,UnsupervisedOutput,CaffeModel>;
   template class CaffeLib<SVMCaffeInputFileConn,UnsupervisedOutput,CaffeModel>;
 }

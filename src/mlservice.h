@@ -128,6 +128,7 @@ namespace dd
       this->_inputc.init(_init_parameters.getobj("input"));
       this->_outputc.init(_init_parameters.getobj("output"));
       this->init_mllib(_init_parameters.getobj("mllib"));
+      this->fillup_measures_history(ad);
     }
 
     /**
@@ -237,6 +238,12 @@ namespace dd
 	  vad.push_back(jad);
 	  ++hit;
 	}
+      APIData stats;
+      stats.add("flops",this->_model_flops);
+      stats.add("params",this->_model_params);
+      stats.add("data_mem_train",this->_mem_used_train * sizeof(float));
+      stats.add("data_mem_test",this->_mem_used_test * sizeof(float));
+      ad.add("stats", stats);
       ad.add("jobs",vad);
       ad.add("parameters",_init_parameters);
       ad.add("repository",this->_inputc._model_repo);
@@ -255,6 +262,7 @@ namespace dd
       APIData jmrepo;
       jmrepo.add("repository",this->_mlmodel._repo);
       out.add("model",jmrepo);
+      //this->fillup_measures_history(ad);
       if (!ad.has("async") || (ad.has("async") && ad.get("async").get<bool>()))
 	{
 	  std::lock_guard<std::mutex> lock(_tjobs_mutex);
@@ -317,13 +325,10 @@ namespace dd
 	      this->est_remain_time(out);
 	      std::chrono::time_point<std::chrono::system_clock> trun = std::chrono::system_clock::now();
 	      out.add("time",std::chrono::duration_cast<std::chrono::seconds>(trun-(*hit).second._tstart).count());
-	      if (ad_params_out.has("max_hist_points") || (ad_params_out.has("measure_hist") && ad_params_out.get("measure_hist").get<bool>()))
-		{
-		  int max_hist_points = 10000; // default
-		  if (ad_params_out.has("max_hist_points"))
-		    max_hist_points = ad_params_out.get("max_hist_points").get<int>();
-		  this->collect_measures_history(out,max_hist_points);
-		}
+	      int max_hist_points = 10000; // default
+	      if (ad_params_out.has("max_hist_points"))
+		max_hist_points = ad_params_out.get("max_hist_points").get<int>();
+	      this->collect_measures_history(out,max_hist_points);
 	    }
 	  else if (status == std::future_status::ready)
 	    {

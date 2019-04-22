@@ -67,10 +67,12 @@ namespace dd
     MLService<CaffeLib,ImgCaffeInputFileConn,SupervisedOutput,CaffeModel>,
     MLService<CaffeLib,VidCaffeInputConn,SupervisedOutput,CaffeModel>,
     MLService<CaffeLib,CSVCaffeInputFileConn,SupervisedOutput,CaffeModel>,
+    MLService<CaffeLib,CSVTSCaffeInputFileConn,SupervisedOutput,CaffeModel>,
     MLService<CaffeLib,TxtCaffeInputFileConn,SupervisedOutput,CaffeModel>,
     MLService<CaffeLib,SVMCaffeInputFileConn,SupervisedOutput,CaffeModel>,
     MLService<CaffeLib,ImgCaffeInputFileConn,UnsupervisedOutput,CaffeModel>,
     MLService<CaffeLib,CSVCaffeInputFileConn,UnsupervisedOutput,CaffeModel>,
+    MLService<CaffeLib,CSVTSCaffeInputFileConn,UnsupervisedOutput,CaffeModel>,
     MLService<CaffeLib,TxtCaffeInputFileConn,UnsupervisedOutput,CaffeModel>,
     MLService<CaffeLib,SVMCaffeInputFileConn,UnsupervisedOutput,CaffeModel>
 #endif
@@ -113,6 +115,7 @@ namespace dd
     #if defined(USE_CAFFE) || defined(USE_CAFFE2) || defined(USE_TF) || defined(USE_DLIB) || defined(USE_XGBOOST) || defined(USE_TSNE)
     ,
     #endif
+    MLService<NCNNLib,CSVTSNCNNInputFileConn,SupervisedOutput,NCNNModel>,
     MLService<NCNNLib,ImgNCNNInputFileConn,SupervisedOutput,NCNNModel>
 #endif
     > mls_variant_type;

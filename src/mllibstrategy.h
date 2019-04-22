@@ -76,7 +76,7 @@ namespace dd
      * \brief copy-constructor
      */
     MLLib(MLLib &&mll) noexcept
-      :_inputc(mll._inputc),_outputc(mll._outputc),_mltype(mll._mltype),_mlmodel(mll._mlmodel),_meas(mll._meas),_tjob_running(mll._tjob_running.load()),_logger(mll._logger)
+      :_inputc(mll._inputc),_outputc(mll._outputc),_mltype(mll._mltype),_mlmodel(mll._mlmodel),_meas(mll._meas),_meas_per_iter(mll._meas_per_iter),_tjob_running(mll._tjob_running.load()),_logger(mll._logger)
       {}
     
     /**
@@ -227,6 +227,26 @@ namespace dd
 	}
       ad.add("measure_hist",meas_hist);
     }
+
+    /**
+     * \brief fill up the in-memory metrics from values gathered
+     *        from metrics.json file into the api data object
+     * @param ad the api data object holding the values
+     */
+    void fillup_measures_history(const APIData &ad)
+    {
+      APIData ad_params = ad.getobj("parameters");
+      if (!ad_params.has("metrics"))
+	return;
+      APIData ad_metrics = ad_params.getobj("metrics");
+      std::vector<std::string> mkeys = ad_metrics.list_keys();
+      for (auto s: mkeys)
+	{
+	  std::vector<double> mdata = ad_metrics.get(s).get<std::vector<double>>();
+	  s.replace(s.find("_hist"),5,"");
+	  _meas_per_iter.insert(std::pair<std::string,std::vector<double>>(s,mdata));
+	}
+    }
     
     /**
      * \brief sets current value of a measure
@@ -327,7 +347,12 @@ namespace dd
 			     When not, prediction calls are rejected while training is running. */
 
     std::shared_ptr<spdlog::logger> _logger; /**< mllib logger. */
-    
+
+    long int _model_flops = 0;  /**< model flops. */
+    long int _model_params = 0;  /**< number of parameters in the model. */
+    long int _mem_used_train = 0; /**< amount  of memory used. */
+    long int _mem_used_test = 0; /**< amount  of memory used. */
+
   protected:
     mutable std::mutex _meas_per_iter_mutex; /**< mutex over measures history. */
     mutable std::mutex _meas_mutex; /** mutex around current measures. */

@@ -85,6 +85,11 @@ namespace dd
         _vals.insert(std::pair<double,APIData>(prob,ad));
       }
 
+      inline void add_timeseries(const double &prob, const APIData&ad)
+      {
+        _series.insert(std::pair<double,APIData>(prob,ad));
+      }
+
 #ifdef USE_SIMSEARCH
       void add_nn(const double &dist, const URIData &uri)
       {
@@ -104,6 +109,7 @@ namespace dd
       std::multimap<double,std::string,std::greater<double>> _cats; /**< categories and probabilities for this result */
       std::multimap<double,APIData,std::greater<double>> _bboxes; /**< bounding boxes information */
       std::multimap<double,APIData,std::greater<double>> _vals; /**< extra data or information added to output, e.g. roi */
+      std::multimap<double,APIData,std::greater<double>> _series; /** <extra data for timeseries */
       std::multimap<double,APIData,std::greater<double>> _masks; /**< masks information */
 #ifdef USE_SIMSEARCH
       bool _indexed = false;
@@ -157,7 +163,9 @@ namespace dd
 	  std::string uri = ad.get("uri").get<std::string>();
 	  double loss = ad.get("loss").get<double>();
 	  std::vector<double> probs = ad.get("probs").get<std::vector<double>>();
-	  std::vector<std::string> cats = ad.get("cats").get<std::vector<std::string>>();
+	  std::vector<std::string> cats;
+         if (ad.has("cats"))
+           cats = ad.get("cats").get<std::vector<std::string>>();
 	  std::vector<APIData> bboxes;
 	  std::vector<APIData> rois;
 	  std::vector<APIData> masks;
@@ -166,6 +174,12 @@ namespace dd
 	  if (ad.has("vals")) {
 	    rois = ad.getv("vals");
 	  }
+         std::vector<APIData> series;
+         if (ad.has("series"))
+           {
+             series = ad.getv("series");
+           }
+
 	  if (ad.has("masks"))
 	    masks = ad.getv("masks");
 	  if ((hit=_vcats.find(uri))==_vcats.end())
@@ -175,11 +189,14 @@ namespace dd
 	      hit = resit.first;
 	      for (size_t i=0;i<probs.size();i++)
 		{
-		  _vvcats.at((*hit).second).add_cat(probs.at(i),cats.at(i));
+		  if (!cats.empty())
+		    _vvcats.at((*hit).second).add_cat(probs.at(i),cats.at(i));
 		  if (!bboxes.empty())
 		    _vvcats.at((*hit).second).add_bbox(probs.at(i),bboxes.at(i));
 		  if (!rois.empty())
 		    _vvcats.at((*hit).second).add_val(probs.at(i),rois.at(i));
+		  if (!series.empty())
+		    _vvcats.at((*hit).second).add_timeseries(probs.at(i),series.at(i));
 		  if (!masks.empty())
 		    _vvcats.at((*hit).second).add_mask(probs.at(i),masks.at(i));
 		}
@@ -338,19 +355,27 @@ namespace dd
 	  ad_out.erase("autoencoder");
 	}
 
+
+
       bool has_bbox = ad_out.has("bbox") && ad_out.get("bbox").get<bool>();
       bool has_roi = ad_out.has("roi") && ad_out.get("roi").get<bool>();
       bool has_mask = ad_out.has("mask") && ad_out.get("mask").get<bool>();
       bool has_multibox_rois = has_roi &&
-	ad_out.has("multibox_rois") && ad_out.get("multibox_rois").get<bool>();
+        ad_out.has("multibox_rois") && ad_out.get("multibox_rois").get<bool>();
+      bool timeseries = ad_out.has("timeseries") && ad_out.get("timeseries").get<bool>();
+
+      if (timeseries)
+        ad_out.erase("timeseries");
 
       if (has_bbox)
-	{
-	  ad_out.erase("nclasses");
-	  ad_out.erase("bbox");
-	}
-      best_cats(ad_in,bcats,nclasses,has_bbox,has_roi,has_mask);
-      
+        {
+          ad_out.erase("nclasses");
+          ad_out.erase("bbox");
+        }
+
+      if (!timeseries)
+        best_cats(ad_in,bcats,nclasses,has_bbox,has_roi,has_mask);
+
       std::unordered_set<std::string> indexed_uris;
 #ifdef USE_SIMSEARCH
       // index
@@ -527,7 +552,10 @@ namespace dd
 
       if (has_multibox_rois)
 	has_roi = false;
-      bcats.to_ad(ad_out,regression,autoencoder,has_bbox,has_roi,has_mask,indexed_uris);
+      if (!timeseries)
+        bcats.to_ad(ad_out,regression,autoencoder,has_bbox,has_roi,has_mask,timeseries,indexed_uris);
+      else
+        to_ad(ad_out,regression,autoencoder,has_bbox,has_roi,has_mask,timeseries,indexed_uris);
     }
     
     struct PredictionAndAnswer {
@@ -547,6 +575,11 @@ namespace dd
       bool multilabel = ad_res.has("multilabel");
       bool net_meas = ad_res.has("net_meas");
       bool bbox = ad_res.has("bbox");
+      bool timeserie = ad_res.has("timeserie");
+      int timeseries = -1;
+      if (timeserie)
+        timeseries = ad_res.get("timeseries").get<int>();
+
       if (ad_out.has("measure"))
 	{
 	  std::vector<std::string> measures = ad_out.get("measure").get<std::vector<std::string>>();
@@ -647,11 +680,13 @@ namespace dd
 	{
 	  double meanacc, meaniou;
 	  std::vector<double> clacc;
-	  double accs = acc_v(ad_res,meanacc,meaniou,clacc);
+	  std::vector<double> cliou;
+	  double accs = acc_v(ad_res,meanacc,meaniou,clacc,cliou);
 	  meas_out.add("acc",accs);
 	  meas_out.add("meanacc",meanacc);
 	  meas_out.add("meaniou",meaniou);
 	  meas_out.add("clacc",clacc);
+         meas_out.add("cliou",cliou);
 	}
       if (mlacc)
 	{
@@ -786,6 +821,55 @@ namespace dd
 	      meas_out.add("mcc",mmcc);
 	      
 	    }
+         if (timeserie)
+           {
+             // we have timeseries outputs (flattened / interleaved in preds!)
+             std::vector<double> max_errors(timeseries);
+             std::vector<int> indexes_max_error(timeseries);
+             std::vector<double> mean_errors(timeseries);
+             double max_error;
+             double mean_error;
+
+             bool L1 = false;
+             bool L2 = false;
+             if (ad_out.has("measure"))
+               {
+                 std::vector<std::string> measures = ad_out.get("measure").get<std::vector<std::string>>();
+                 L1 = (std::find(measures.begin(),measures.end(),"L1")!=measures.end());
+                 L2 = (std::find(measures.begin(),measures.end(),"L2")!=measures.end());
+               }
+
+             if (!L1 && !L2)
+               L1 = true;
+
+             if (L1)
+               {
+                 timeSeriesErrors(ad_res, timeseries, &max_errors[0], &indexes_max_error[0], &mean_errors[0], max_error, mean_error, true);
+                 for (int i=0; i<timeseries; ++i)
+                   {
+                     meas_out.add("L1_max_error_" + std::to_string(i),max_errors[i]);
+                     meas_out.add("L1_max_error_" + std::to_string(i) + "_date" ,(double)(indexes_max_error[i]));
+                     meas_out.add("L1_mean_error_" + std::to_string(i),mean_errors[i]);
+                   }
+                 meas_out.add("L1_max_error", max_error);
+                 meas_out.add("L1_mean_error", mean_error);
+                 if (!L2)
+                   meas_out.add("eucll", mean_error);
+               }
+             if (L2)
+               {
+                 timeSeriesErrors(ad_res, timeseries, &max_errors[0], &indexes_max_error[0], &mean_errors[0], max_error, mean_error, false);
+                 for (int i=0; i<timeseries; ++i)
+                   {
+                     meas_out.add("L2_max_error_" + std::to_string(i),max_errors[i]);
+                     meas_out.add("L2_max_error_" + std::to_string(i) + "_date" ,(double)(indexes_max_error[i]));
+                     meas_out.add("L2_mean_error_" + std::to_string(i),mean_errors[i]);
+                   }
+                 meas_out.add("L2_max_error", max_error);
+                 meas_out.add("L2_mean_error", mean_error);
+                 meas_out.add("eucll", mean_error);
+               }
+           }
 	}
 	if (loss)
 	  meas_out.add("loss",ad_res.get("loss").get<double>()); // 'universal', comes from algorithm
@@ -795,6 +879,84 @@ namespace dd
 	  meas_out.add("iteration",ad_res.get("iteration").get<double>());
 	out.add("measure",meas_out);
     }
+
+    static void timeSeriesErrors(const APIData &ad, const int timeseries,
+                                 double * const max_errors, int * const indexes_max_error,
+                                 double * const mean_errors, double& max_error,
+                                 double& mean_error, bool L1)
+    {
+      Eigen::Map<dVec> mean_error_vector = dVec::Map(mean_errors, timeseries);
+      Eigen::Map<Eigen::VectorXi> idxmxerrors = Eigen::VectorXi::Map(indexes_max_error,timeseries);
+      mean_error_vector.setZero();
+      Eigen::Map<dVec> max = dVec::Map(max_errors,timeseries);
+      double nts = 0;
+      int batch_size = ad.get("batch_size").get<int>();
+      for (int i=0;i<batch_size;i++)
+        {
+          APIData bad = ad.getobj(std::to_string(i));
+          std::vector<double> targets = bad.get("target").get<std::vector<double>>();
+          /* std::cout << "targets: " ; */
+          /* for (double d: targets) */
+          /*   std::cout << d << " "; */
+          /* std::cout << std::endl; */
+          std::vector<double> predictions = bad.get("pred").get<std::vector<double>>();
+          /* std::cout << "predictions: "; */
+          /* for (double d : predictions) */
+          /*   std::cout << d << " "; */
+          /* std::cout << std::endl; */
+          nts+=targets.size();
+
+          int dataduration = targets.size() / timeseries;
+          typedef Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> Mdat;
+          Mdat dpred = Mdat::Map(&predictions.at(0), dataduration, timeseries);
+          Mdat dtarg = Mdat::Map(&targets.at(0), dataduration, timeseries);
+          // now can access dpred(timestep_number, serie_number)
+          Mdat error;
+          error = (dpred - dtarg).cwiseAbs();
+          if (!L1)
+            error = error.array() * error.array();
+          //          std::cout << "error: " << error << std::endl;
+          dVec batchmax = error.colwise().maxCoeff();
+          std::vector<int> batch_max_indexes(timeseries);
+          for (int j =0; j<timeseries; ++j)
+              error.col(j).maxCoeff(&(batch_max_indexes[j]));
+
+          mean_error_vector += error.colwise().sum();
+          if (!L1)
+            mean_error_vector = mean_error_vector.array().sqrt();
+          if (i==0)
+            {
+              max = batchmax;
+              for (int j =0; j<timeseries; ++j)
+                idxmxerrors(j) = batch_max_indexes[j];
+            }
+          else
+            {
+              for (int j =0; j<timeseries; ++j)
+                {
+                  if (batchmax(j) > max(j))
+                    {
+                      max(j) = batchmax(j);
+                      idxmxerrors(j) = batch_max_indexes[j];
+                    }
+                }
+            }
+        }
+      mean_error_vector /= static_cast<float>(nts) ;
+      mean_error_vector *= timeseries;
+
+      max_error = max_errors[0];
+      mean_error = mean_errors[0];
+      for (int i =1; i<timeseries; ++i)
+        {
+          if (max_errors[i] > max_error)
+            max_error = max_errors[i];
+          mean_error += mean_errors[i];
+        }
+      mean_error /= timeseries;
+    }
+
+
 
     static void find_presence_and_thres(std::string meas, std::vector<std::string> measures, bool& do_meas, float& meas_thres)
     {
@@ -875,7 +1037,7 @@ namespace dd
       return accs;
     }
 
-    static double acc_v(const APIData &ad, double &meanacc, double &meaniou, std::vector<double> &clacc)
+    static double acc_v(const APIData &ad, double &meanacc, double &meaniou, std::vector<double> &clacc, std::vector<double> &cliou)
     {
       int nclasses = ad.get("nclasses").get<int>();
       int batch_size = ad.get("batch_size").get<int>();
@@ -944,6 +1106,7 @@ namespace dd
 	  meaniou += mean_iou[c];
 	}
       clacc = mean_acc;
+      cliou = mean_iou;
 
       // corner case where prediction is wrong
       if (c_nclasses > 0) {
@@ -1588,9 +1751,10 @@ namespace dd
     
     // measure: gini coefficient
     static double comp_gini(const std::vector<double> &a, const std::vector<double> &p) {
-      struct K {double a, p;} k[a.size()];
+      struct K { double a, p; };
+      std::vector<K> k(a.size());
       for (size_t i = 0; i != a.size(); ++i) k[i] = {a[i], p[i]};
-      std::stable_sort(k, k+a.size(), [](const K &a, const K &b) {return a.p > b.p;});
+      std::stable_sort(k.begin(), k.end(), [](const K &a, const K &b) {return a.p > b.p;});
       double accPopPercSum=0, accLossPercSum=0, giniSum=0, sum=0;
       for (auto &i: a) sum += i;
       for (auto &i: k) 
@@ -1660,8 +1824,8 @@ namespace dd
      * @param indexed_uris list of indexed uris, if any
      */
     void to_ad(APIData &out, const bool &regression, const bool &autoencoder,
-	       const bool &has_bbox, const bool &has_roi, const bool &has_mask,
-	       const std::unordered_set<std::string> &indexed_uris) const
+               const bool &has_bbox, const bool &has_roi, const bool &has_mask, const bool &timeseries,
+               const std::unordered_set<std::string> &indexed_uris) const
     {
 #ifndef USE_SIMSEARCH
       (void)indexed_uris;
@@ -1672,8 +1836,8 @@ namespace dd
       static std::string bb = "bbox";
       static std::string roi = "vals";
       static std::string rois = "rois";
+      static std::string series = "series";
       static std::string mask = "mask";
-
       static std::string phead = "prob";
       static std::string chead = "cat";
       static std::string vhead = "val";
@@ -1771,7 +1935,23 @@ namespace dd
 		}
 	    }
 #endif
-	  if (regression)
+         if (!_vvcats.at(i)._series.empty())
+           {
+             auto sit = _vvcats.at(i)._series.begin();
+             while(sit!=_vvcats.at(i)._series.end())
+               {
+                 APIData nad;
+                 nad.add("out",(*sit).second.get("out").get<std::vector<double>>());
+                 ++sit;
+                 if (sit == _vvcats.at(i)._series.end())
+                   nad.add(last,true);
+                 v.push_back(nad);
+               }
+           }
+
+         if (timeseries)
+           adpred.add(series,v);
+	  else if (regression)
 	    adpred.add(ve,v);
 	  else if (autoencoder)
 	    adpred.add(ae,v);
