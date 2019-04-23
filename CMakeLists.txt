@@ -6,6 +6,7 @@ option(USE_TF "use TF backend")
 option(USE_NCNN "use NCNN backend")
 option(USE_HDF5 "use HDF5" ON)
 option(USE_CAFFE "use Caffe backend" ON)
+option(USE_LIBVNN "use libvnn connector")
 
 if (USE_CAFFE)
   add_definitions(-DUSE_CAFFE)
@@ -15,8 +16,6 @@ if (USE_TF AND USE_CAFFE2)
   message(FATAL_ERROR "Building with tensorflow AND caffe2 causes conflict
 (The two libraries have their own protobuf embed)")
 endif()
-
-set(CMAKE_PREFIX_PATH "/home/bugsi/dev/local/lib/pkgconfig")
 
 set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
@@ -622,10 +621,25 @@ if (USE_NCNN)
   include_directories(${NCNN_INC_DIR})
 endif()
 
-set(LOCAL_LIB_DIR /home/bugsi/dev/local/lib/)
-
-set(LOCAL_INCLUDE_DIR /home/bugsi/dev/local/include/)
-include_directories("${LOCAL_INCLUDE_DIR}")
+# libvnn
+if (USE_LIBVNN)
+  message(STATUS "Fetching libvnn")
+  add_definitions(-DUSE_LIBVNN)
+  ExternalProject_Add(
+    libvnn
+    PREFIX libvnn
+    INSTALL_DIR ${CMAKE_BINARY_DIR}
+    DOWNLOAD_COMMAND git clone https://github.com/jolibrain/libvnn.git
+    CONFIGURE_COMMAND mkdir -p build && cd build && cmake ..
+    BUILD_COMMAND cd build && make -j${N}
+    INSTALL_COMMAND ""
+    BUILD_IN_SOURCE 1
+    )
+set(LIBVNN_LIB_DIR ${CMAKE_BINARY_DIR}/libvnn/src/libvnn/build/src) #/home/beniz/projects/deepdetect/dev/libvnn/build/src/)
+set(LIBVNN_INCLUDE_DIR ${CMAKE_BINARY_DIR}/libvnn/src/libvnn/src) #/home/beniz/projects/deepdetect/dev/libvnn/src/)
+set(VNN_LIBS vnn gobject-2.0 glib-2.0 gstapp-1.0 gstbase-1.0 gstreamer-1.0 gstpbutils-1.0)
+include_directories("${LIBVNN_INCLUDE_DIR}")
+endif()
 
 # main library, main & tests
 include_directories ("${PROJECT_SOURCE_DIR}/src")
@@ -641,11 +655,10 @@ set(COMMON_LINK_DIRS
   ${TSNE_LIB_DIR}
   ${NCNN_LIB_DIR}
   ${DLIB_LIB_DIR}
-  ${LOCAL_LIB_DIR})
+  ${LIBVNN_LIB_DIR})
 if (USE_HDF5)
   set(COMMON_LINK_LIBS
-    ddetect ${CUDA_LIB_DEPS} glog gflags ${OpenCV_LIBS} curlpp curl hdf5_cpp ${Boost_LIBRARIES} archive
-    vnn gobject-2.0 glib-2.0 gstapp-1.0 gstbase-1.0 gstreamer-1.0 gstpbutils-1.0
+    ddetect ${CUDA_LIB_DEPS} glog gflags ${OpenCV_LIBS} curlpp curl hdf5_cpp ${Boost_LIBRARIES} archive ${VNN_LIBS}
     ${CAFFE_LIB_DEPS}
     ${CAFFE2_LIB_DEPS}
     ${TF_LIB_DEPS}
@@ -655,8 +668,7 @@ if (USE_HDF5)
     ${DLIB_LIB_DEPS})
 else()
   set(COMMON_LINK_LIBS
-    ddetect ${CUDA_LIB_DEPS} glog gflags ${OpenCV_LIBS} curlpp curl ${Boost_LIBRARIES} archive
-    vnn gobject-2.0 glib-2.0 gstapp-1.0 gstbase-1.0 gstreamer-1.0 gstpbutils-1.0
+    ddetect ${CUDA_LIB_DEPS} glog gflags ${OpenCV_LIBS} curlpp curl ${Boost_LIBRARIES} archive ${VNN_LIBS}
     ${CAFFE_LIB_DEPS}
     ${CAFFE2_LIB_DEPS}
     ${TF_LIB_DEPS}
