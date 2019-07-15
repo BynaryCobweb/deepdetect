@@ -59,6 +59,12 @@ if (USE_NCNN)
     backends/ncnn/ncnnmodel.cc
   )
 endif()
+if (USE_TORCH)
+  list(APPEND ddetect_SOURCES
+    backends/torch/torchlib.cc
+    backends/torch/torchmodel.cc
+  )
+endif()
 if (USE_TENSORRT)
   file(DOWNLOAD https://raw.githubusercontent.com/jolibrain/caffe/master/src/caffe/proto/caffe.proto ${CMAKE_SOURCE_DIR}/src/backends/tensorrt/caffe.proto)
   if (NOT USE_CAFFE2 AND NOT USE_TF)

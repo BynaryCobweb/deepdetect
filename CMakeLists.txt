@@ -4,6 +4,7 @@ project(deepdetect)
 option(USE_CAFFE2 "build caffe2 backend")
 option(USE_TF "use TF backend")
 option(USE_NCNN "use NCNN backend")
+option(USE_TORCH "use libtorch backend")
 option(USE_HDF5 "use HDF5" ON)
 option(USE_CAFFE "use Caffe backend" ON)
 option(USE_TENSORRT "use TensorRT backend" OFF)
@@ -586,6 +587,12 @@ if (USE_NCNN)
   endif()
   set(NCNN_INC_DIR ${CMAKE_BINARY_DIR}/ncnn/src/ncnn/src ${CMAKE_BINARY_DIR}/ncnn/src/ncnn/build/src)
   set(NCNN_LIB_DIR ${CMAKE_BINARY_DIR}/ncnn/src/ncnn/build/src)
+endif()
+
+# Torch
+if (USE_TORCH)
+  message(STATUS "Configuring libtorch")
+  add_definitions(-DUSE_TORCH)
 endif()
 
 # XGBoost
