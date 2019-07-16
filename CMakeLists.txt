@@ -611,7 +611,7 @@ if (USE_TORCH)
   ]]
 
   find_package(Torch
-            PATHS ${CMAKE_BINARY_DIR}/libtorch/src/libtorch/
+            PATHS ${CMAKE_BINARY_DIR}/libtorch/
             REQUIRED)
   set(TORCH_INC_DIR ${TORCH_INCLUDE_DIRS})
   set(TORCH_LIB_DEPS ${TORCH_LIBRARIES})
