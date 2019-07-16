@@ -593,6 +593,28 @@ endif()
 if (USE_TORCH)
   message(STATUS "Configuring libtorch")
   add_definitions(-DUSE_TORCH)
+
+  #[[
+  ExternalProject_Add(
+    libtorch
+    PREFIX libtorch
+    INSTALL_DIR ${CMAKE_BINARY_DIR}/
+    URL https://download.pytorch.org/libtorch/cpu/libtorch-shared-with-deps-latest.zip
+    CONFIGURE_COMMAND ""
+    BUILD_COMMAND ""
+    INSTALL_COMMAND ""
+  )
+
+  set(TORCH_LIB_DEPS torch ${CMAKE_BINARY_DIR}/libtorch/src/libtorch/lib/libc10.so)
+  set(TORCH_INC_DIR ${CMAKE_BINARY_DIR}/libtorch/src/libtorch/include/ ${CMAKE_BINARY_DIR}/libtorch/src/libtorch/include/torch/csrc/api/include/)
+  set(TORCH_LIB_DIR ${CMAKE_BINARY_DIR}/libtorch/src/libtorch/lib/)
+  ]]
+
+  find_package(Torch
+            PATHS ${CMAKE_BINARY_DIR}/libtorch/src/libtorch/
+            REQUIRED)
+  set(TORCH_INC_DIR ${TORCH_INCLUDE_DIRS})
+  set(TORCH_LIB_DEPS ${TORCH_LIBRARIES})
 endif()
 
 # XGBoost
@@ -651,7 +673,7 @@ endif()
 # add the binary tree to the search path for include files
 # so that we will find dd_config.h
 include_directories("${PROJECT_BINARY_DIR}")
-include_directories(${CAFFE_INC_DIR} ${CAFFE2_INC_DIR} ${XGBOOST_INC_DIR} ${TSNE_INC_DIR})
+include_directories(${CAFFE_INC_DIR} ${CAFFE2_INC_DIR} ${XGBOOST_INC_DIR} ${TSNE_INC_DIR} ${TORCH_INC_DIR})
 include_directories(${CMAKE_SOURCE_DIR}/src/backends/caffe ${CMAKE_SOURCE_DIR}/backends/xgb ${CMAKE_SOURCE_DIR}/backends/tf ${CMAKE_SOURCE_DIR}/backends/dlib ${CMAKE_SOURCE_DIR}/backends/tsne)
 
 if (USE_NCNN)
@@ -713,7 +735,8 @@ set(COMMON_LINK_DIRS
   ${TF_LIB_DIR}
   ${XGBOOST_LIB_DIR}
   ${TSNE_LIB_DIR}
-  ${NCNN_LIB_DIR})
+  ${NCNN_LIB_DIR}
+  ${TORCH_LIB_DIR})
 if (USE_HDF5)
   set(COMMON_LINK_LIBS
     ddetect ${DLIB_LIB_DEPS} ${TENSORRT_LIB_DEPS} ${CUDA_LIB_DEPS} glog gflags ${OpenCV_LIBS} curlpp curl hdf5_cpp ${Boost_LIBRARIES} archive
@@ -722,7 +745,8 @@ if (USE_HDF5)
     ${TF_LIB_DEPS}
     ${XGBOOST_LIB_DEPS}
     ${TSNE_LIB_DEPS}
-    ${NCNN_LIB_DEPS})
+    ${NCNN_LIB_DEPS}
+    ${TORCH_LIB_DEPS})
 else()
   set(COMMON_LINK_LIBS
     ddetect ${DLIB_LIB_DEPS} ${TENSORRT_LIB_DEPS} ${CUDA_LIB_DEPS} glog gflags ${OpenCV_LIBS} curlpp curl ${Boost_LIBRARIES} archive
@@ -731,7 +755,8 @@ else()
     ${TF_LIB_DEPS}
     ${XGBOOST_LIB_DEPS}
     ${TSNE_LIB_DEPS}
-    ${NCNN_LIB_DEPS})
+    ${NCNN_LIB_DEPS}
+    ${TORCH_LIB_DEPS})
 endif()
 set(HTTP_LINK_LIBS cppnetlib-uri crypto ssl)
 

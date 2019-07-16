@@ -22,6 +22,8 @@
 #ifndef TORCHLIB_H
 #define TORCHLIB_H
 
+#include <torch/torch.h>
+
 #include "apidata.h"
 #include "mllibstrategy.h"
 

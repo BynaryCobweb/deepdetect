@@ -23,6 +23,8 @@
 
 #include "outputconnectorstrategy.h"
 
+using namespace torch;
+
 namespace dd
 {
     template <class TInputConnectorStrategy, class TOutputConnectorStrategy, class TMLModel>
@@ -45,7 +47,8 @@ namespace dd
     /*- from mllib -*/
     template <class TInputConnectorStrategy, class TOutputConnectorStrategy, class TMLModel>
     void TorchLib<TInputConnectorStrategy, TOutputConnectorStrategy, TMLModel>::init_mllib(const APIData &ad) {
-
+        auto tensorTest = torch::rand(IntList{3,1});
+        std::cout << tensorTest << std::endl;
     }
 
     template <class TInputConnectorStrategy, class TOutputConnectorStrategy, class TMLModel>
