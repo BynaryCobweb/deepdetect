@@ -55,7 +55,7 @@ namespace dd
     void TorchLib<TInputConnectorStrategy, TOutputConnectorStrategy, TMLModel>::init_mllib(const APIData &ad) 
     {
         _traced = torch::jit::load(this->_mlmodel._model_file);
-        _traced.eval();
+        _traced->eval();
     }
 
     template <class TInputConnectorStrategy, class TOutputConnectorStrategy, class TMLModel>
@@ -87,7 +87,7 @@ namespace dd
         std::vector<APIData> results_ads;
 
         for (auto &in : inputc._in_tensors) {
-            Tensor output = _traced.forward({in}).toTensor();
+            Tensor output = _traced->forward({in}).toTensor();
             output = torch::softmax(output, 1);
             std::tuple<Tensor, Tensor> sorted_output = output.sort(1, true);
             
