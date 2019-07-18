@@ -25,6 +25,7 @@
 #include "imginputfileconn.h"
 #include "csvtsinputfileconn.h"
 
+#include <vector>
 
 namespace dd
 {
@@ -68,10 +69,37 @@ namespace dd
         
         void transform(const APIData &ad)
         {
-            
+            try
+            {
+                ImgInputFileConn::transform(ad);
+            }
+            catch(const std::exception& e)
+            {
+                throw;
+            }
+
+
+            for (const cv::Mat &bgr : this->_images) {
+                _height = bgr.rows;
+                _width = bgr.cols;
+
+                std::vector<int64_t> sizes{ 1, _height, _width, 3 };
+                at::TensorOptions options(at::ScalarType::Byte);
+                at::Tensor imgt = torch::from_blob(bgr.data, at::IntList(sizes), options);
+                imgt = imgt.toType(at::kFloat).mul(1./255.).permute({0, 3, 1, 2});
+
+                // bgr to rgb
+                at::Tensor indexes = torch::ones(3, at::kLong);
+                indexes[0] = 2;
+                indexes[2] = 0;
+                imgt = torch::index_select(imgt, 1, indexes);
+
+                _in_tensors.push_back(imgt);
+            }
         }
 
     public:
+        std::vector<at::Tensor> _in_tensors;
     };
 } // namespace dd
 

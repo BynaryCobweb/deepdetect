@@ -21,6 +21,8 @@
 
 #include "torchlib.h"
 
+#include <torch/script.h>
+
 #include "outputconnectorstrategy.h"
 
 using namespace torch;
@@ -29,41 +31,97 @@ namespace dd
 {
     template <class TInputConnectorStrategy, class TOutputConnectorStrategy, class TMLModel>
     TorchLib<TInputConnectorStrategy, TOutputConnectorStrategy, TMLModel>::TorchLib(const TorchModel &tmodel)
-        : MLLib<TInputConnectorStrategy,TOutputConnectorStrategy,TorchModel>(tmodel) {
+        : MLLib<TInputConnectorStrategy,TOutputConnectorStrategy,TorchModel>(tmodel) 
+    {
         this->_libname = "torch";
     }
 
     template <class TInputConnectorStrategy, class TOutputConnectorStrategy, class TMLModel>
     TorchLib<TInputConnectorStrategy, TOutputConnectorStrategy, TMLModel>::TorchLib(TorchLib &&tl) noexcept
-        : MLLib<TInputConnectorStrategy,TOutputConnectorStrategy,TorchModel>(std::move(tl)) {
+        : MLLib<TInputConnectorStrategy,TOutputConnectorStrategy,TorchModel>(std::move(tl))
+    {
         this->_libname = "torch";
+        _traced = std::move(tl._traced);
     }
 
     template <class TInputConnectorStrategy, class TOutputConnectorStrategy, class TMLModel>
-    TorchLib<TInputConnectorStrategy, TOutputConnectorStrategy, TMLModel>::~TorchLib() {
+    TorchLib<TInputConnectorStrategy, TOutputConnectorStrategy, TMLModel>::~TorchLib() 
+    {
         
     }
 
     /*- from mllib -*/
     template <class TInputConnectorStrategy, class TOutputConnectorStrategy, class TMLModel>
-    void TorchLib<TInputConnectorStrategy, TOutputConnectorStrategy, TMLModel>::init_mllib(const APIData &ad) {
-        auto tensorTest = torch::rand(IntList{3,1});
-        std::cout << tensorTest << std::endl;
+    void TorchLib<TInputConnectorStrategy, TOutputConnectorStrategy, TMLModel>::init_mllib(const APIData &ad) 
+    {
+        _traced = torch::jit::load(this->_mlmodel._model_file);
+        _traced.eval();
     }
 
     template <class TInputConnectorStrategy, class TOutputConnectorStrategy, class TMLModel>
-    void TorchLib<TInputConnectorStrategy, TOutputConnectorStrategy, TMLModel>::clear_mllib(const APIData &ad) {
+    void TorchLib<TInputConnectorStrategy, TOutputConnectorStrategy, TMLModel>::clear_mllib(const APIData &ad) 
+    {
 
     }
 
     template <class TInputConnectorStrategy, class TOutputConnectorStrategy, class TMLModel>
-    int TorchLib<TInputConnectorStrategy, TOutputConnectorStrategy, TMLModel>::train(const APIData &ad, APIData &out) {
-
+    int TorchLib<TInputConnectorStrategy, TOutputConnectorStrategy, TMLModel>::train(const APIData &ad, APIData &out) 
+    {
+        
     }
 
     template <class TInputConnectorStrategy, class TOutputConnectorStrategy, class TMLModel>
-    int TorchLib<TInputConnectorStrategy, TOutputConnectorStrategy, TMLModel>::predict(const APIData &ad, APIData &out) {
+    int TorchLib<TInputConnectorStrategy, TOutputConnectorStrategy, TMLModel>::predict(const APIData &ad, APIData &out) 
+    {
+        APIData params = ad.getobj("parameters");
+        APIData output_params = params.getobj("output");
 
+        TInputConnectorStrategy inputc(this->_inputc);
+        TOutputConnectorStrategy outputc;
+        try {
+            inputc.transform(ad);
+        } catch (...) {
+            throw;
+        }
+
+        std::vector<APIData> results_ads;
+
+        for (auto &in : inputc._in_tensors) {
+            Tensor output = _traced.forward({in}).toTensor();
+            output = torch::softmax(output, 1);
+            std::tuple<Tensor, Tensor> sorted_output = output.sort(1, true);
+            
+            // Output
+            APIData results_ad; 
+
+            std::vector<double> probs;
+            std::vector<std::string> cats;
+
+            if (output_params.has("best")) {
+                const int best_count = output_params.get("best").get<int>();
+
+                for (int i = 0; i < best_count; ++i) {
+                    probs.push_back(std::get<0>(sorted_output).slice(1, i, i + 1).item<double>());
+                    int index = std::get<1>(sorted_output).slice(1, i, i + 1).item<int>();
+                    cats.push_back(this->_mlmodel.get_hcorresp(index));
+                }
+            }
+
+            results_ad.add("uri", inputc._uris.at(results_ads.size()));
+            results_ad.add("loss", 0.0);
+            results_ad.add("cats", cats);
+            results_ad.add("probs", probs);
+            results_ad.add("nclasses", 4);
+
+            results_ads.push_back(results_ad);
+        }
+
+        outputc.add_results(results_ads);
+        outputc.finalize(output_params, out, static_cast<MLModel*>(&this->_mlmodel));
+
+        out.add("status", 0);
+
+        return 0;
     }
 
 

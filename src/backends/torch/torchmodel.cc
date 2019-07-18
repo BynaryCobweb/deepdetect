@@ -23,5 +23,26 @@
 
 namespace dd
 {
-    
+    int TorchModel::read_from_repository(
+        const std::shared_ptr<spdlog::logger> &logger) {
+
+        std::unordered_set<std::string> files;
+        int err = fileops::list_directory(_repo, true, false, false, files);
+
+        if (err != 0) {
+            logger->error("Listing pytorch models failed");
+            return 1;
+        }
+
+        for (const auto &file : files) {
+            if (file.find(".pt") != std::string::npos) {
+                _model_file = file;
+            }
+            else if (file.find("corresp") != std::string::npos) {
+                _corresp = file;
+            }
+        }
+
+        return 0;
+    }
 }

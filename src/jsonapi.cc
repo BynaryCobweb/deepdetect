@@ -531,7 +531,7 @@ namespace dd
 #ifdef USE_TORCH
   else if (mllib == "torch")
   {
-    TorchModel torchmodel; // (ad_model,ad,_logger)
+    TorchModel torchmodel(ad_model,ad,_logger);
     read_metrics_json(torchmodel._repo,ad);
     if (type == "supervised")
     {

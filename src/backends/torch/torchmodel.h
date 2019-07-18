@@ -29,7 +29,26 @@ namespace dd
 {
     class TorchModel : public MLModel
     {
+    public:
+        TorchModel() : MLModel() {}
 
+        TorchModel(const APIData &ad, APIData &adg,
+		    const std::shared_ptr<spdlog::logger> &logger)
+	        : MLModel(ad, adg, logger) {
+
+	        read_from_repository(spdlog::get("api"));
+            read_corresp_file();
+        }
+
+        TorchModel(const std::string &repo)
+            : MLModel(repo) {}
+        
+        ~TorchModel() {}
+
+        int read_from_repository(const std::shared_ptr<spdlog::logger> &logger);
+
+    public:
+        std::string _model_file;
     };
 }
 
