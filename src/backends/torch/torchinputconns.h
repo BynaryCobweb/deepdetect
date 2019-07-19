@@ -23,7 +23,7 @@
 #define TORCHINPUTCONNS_H
 
 #include "imginputfileconn.h"
-#include "csvtsinputfileconn.h"
+#include "txtinputfileconn.h"
 
 #include <vector>
 

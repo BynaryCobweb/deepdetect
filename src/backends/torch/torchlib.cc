@@ -54,7 +54,25 @@ namespace dd
     template <class TInputConnectorStrategy, class TOutputConnectorStrategy, class TMLModel>
     void TorchLib<TInputConnectorStrategy, TOutputConnectorStrategy, TMLModel>::init_mllib(const APIData &ad) 
     {
+        bool gpu = false;
+        APIData lib_ad = ad.getobj("parameters").getobj("mllib");
+
+        if (lib_ad.has("gpu")) {
+            gpu = lib_ad.get("gpu").get<bool>();
+        }
+
+        if (gpu) {
+            if (!torch::cuda::is_available()) {
+                throw std::runtime_error("GPU not available");
+            }
+            _device = torch::Device("cuda");
+        }
+        else {
+            _device = torch::Device("cpu");
+        }
+
         _traced = torch::jit::load(this->_mlmodel._model_file);
+        _traced->to(_device);
         _traced->eval();
     }
 
@@ -87,7 +105,7 @@ namespace dd
         std::vector<APIData> results_ads;
 
         for (auto &in : inputc._in_tensors) {
-            Tensor output = _traced->forward({in}).toTensor();
+            Tensor output = _traced->forward({in.to(_device)}).toTensor();
             output = torch::softmax(output, 1);
             std::tuple<Tensor, Tensor> sorted_output = output.sort(1, true);
             
