@@ -50,6 +50,7 @@ namespace dd
         int predict(const APIData &ad, APIData &out);
 
     public:
+        int _nclasses = 0;
         torch::Device _device = torch::Device("cpu");
         std::shared_ptr<torch::jit::script::Module> _traced;
     };

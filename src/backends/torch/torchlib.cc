@@ -58,18 +58,13 @@ namespace dd
         APIData lib_ad = ad.getobj("parameters").getobj("mllib");
 
         if (lib_ad.has("gpu")) {
-            gpu = lib_ad.get("gpu").get<bool>();
+            gpu = lib_ad.get("gpu").get<bool>() && torch::cuda::is_available();
+        }
+        if (lib_ad.has("nclasses")) {
+            _nclasses = lib_ad.get("nclasses").get<int>();
         }
 
-        if (gpu) {
-            if (!torch::cuda::is_available()) {
-                throw std::runtime_error("GPU not available");
-            }
-            _device = torch::Device("cuda");
-        }
-        else {
-            _device = torch::Device("cpu");
-        }
+        _device = gpu ? torch::Device("cuda") : torch::Device("cpu");
 
         _traced = torch::jit::load(this->_mlmodel._model_file);
         _traced->to(_device);
