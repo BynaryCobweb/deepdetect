@@ -594,24 +594,26 @@ if (USE_TORCH)
   message(STATUS "Configuring libtorch")
   add_definitions(-DUSE_TORCH)
 
-  #[[
-  ExternalProject_Add(
-    libtorch
-    PREFIX libtorch
-    INSTALL_DIR ${CMAKE_BINARY_DIR}/
-    URL https://download.pytorch.org/libtorch/cpu/libtorch-shared-with-deps-latest.zip
-    CONFIGURE_COMMAND ""
-    BUILD_COMMAND ""
-    INSTALL_COMMAND ""
-  )
+  if(NOT SKIP_INSTALL_TORCH)
+    set(PYTORCH_COMMIT 0b868b19063645afed59d6d49aff1e43d1665b88)
+    set(PYTORCH_CMAKE_FLAGS )
+    set(PYTORCH_COMPLETE ${CMAKE_BINARY_DIR}/CMakeFiles/pytorch-complete)
 
-  set(TORCH_LIB_DEPS torch ${CMAKE_BINARY_DIR}/libtorch/src/libtorch/lib/libc10.so)
-  set(TORCH_INC_DIR ${CMAKE_BINARY_DIR}/libtorch/src/libtorch/include/ ${CMAKE_BINARY_DIR}/libtorch/src/libtorch/include/torch/csrc/api/include/)
-  set(TORCH_LIB_DIR ${CMAKE_BINARY_DIR}/libtorch/src/libtorch/lib/)
-  ]]
+    ExternalProject_Add(
+      pytorch
+      PREFIX pytorch
+      INSTALL_DIR ${CMAKE_BINARY_DIR}
+      GIT_REPOSITORY https://github.com/pytorch/pytorch.git
+      GIT_TAG ${PYTORCH_SUPPORTED_COMMIT}
+      UPDATE_DISCONNECTED 1
+      CONFIGURE_COMMAND ""
+      BUILD_COMMAND test -f ${PYTORCH_COMPLETE} && echo Skipping || (export GLIBCXX_USE_CXX11_ABI=1; python3 ../tools/build_libtorch.py)
+      INSTALL_COMMAND ""
+    )
+  endif()
 
   find_package(Torch
-            PATHS ${CMAKE_BINARY_DIR}/libtorch/
+            PATHS ${CMAKE_BINARY_DIR}/pytorch/src/pytorch/torch
             REQUIRED)
   set(TORCH_INC_DIR ${TORCH_INCLUDE_DIRS})
   set(TORCH_LIB_DEPS ${TORCH_LIBRARIES})
