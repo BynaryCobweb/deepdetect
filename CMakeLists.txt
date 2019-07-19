@@ -594,29 +594,45 @@ if (USE_TORCH)
   message(STATUS "Configuring libtorch")
   add_definitions(-DUSE_TORCH)
 
-  if(NOT SKIP_INSTALL_TORCH)
+  if (NOT TORCH_LOCATION)
     set(PYTORCH_COMMIT 0b868b19063645afed59d6d49aff1e43d1665b88)
-    set(PYTORCH_CMAKE_FLAGS )
+    set(PYTORCH_CMAKE_FLAGS GLIBCXX_USE_CXX11_ABI=1)
     set(PYTORCH_COMPLETE ${CMAKE_BINARY_DIR}/CMakeFiles/pytorch-complete)
+
+    if(NOT USE_CPU_ONLY)
+      list(APPEND PYTORCH_CMAKE_FLAGS USE_CUDA=1)
+    endif()
 
     ExternalProject_Add(
       pytorch
       PREFIX pytorch
       INSTALL_DIR ${CMAKE_BINARY_DIR}
       GIT_REPOSITORY https://github.com/pytorch/pytorch.git
-      GIT_TAG ${PYTORCH_SUPPORTED_COMMIT}
+      GIT_TAG ${PYTORCH_COMMIT}
       UPDATE_DISCONNECTED 1
       CONFIGURE_COMMAND ""
-      BUILD_COMMAND test -f ${PYTORCH_COMPLETE} && echo Skipping || (export GLIBCXX_USE_CXX11_ABI=1; python3 ../tools/build_libtorch.py)
+      BUILD_COMMAND export ${PYTORCH_CMAKE_FLAGS}
+      COMMAND test -f ${PYTORCH_COMPLETE} && echo Skipping || python3 ../pytorch/tools/build_libtorch.py
       INSTALL_COMMAND ""
     )
+
+    set(TORCH_LOCATION ${CMAKE_BINARY_DIR}/pytorch/src/pytorch/torch)
   endif()
 
-  find_package(Torch
-            PATHS ${CMAKE_BINARY_DIR}/pytorch/src/pytorch/torch
-            REQUIRED)
-  set(TORCH_INC_DIR ${TORCH_INCLUDE_DIRS})
-  set(TORCH_LIB_DEPS ${TORCH_LIBRARIES})
+  #find_package(Torch
+  #  PATHS ${TORCH_LOCATION}
+  #  REQUIRED
+  #  )
+  #message(STATUS "Libraries are: ${TORCH_LIBRARIES}")
+
+  set(TORCH_LIB_DEPS torch caffe2 ${TORCH_LOCATION}/lib/libc10.so)
+  
+  if (NOT USE_CPU_ONLY)
+    list(APPEND TORCH_LIB_DEPS caffe2_gpu ${TORCH_LOCATION}/lib/libc10_cuda.so)
+  endif()
+
+  set(TORCH_INC_DIR ${TORCH_LOCATION}/include/ ${TORCH_LOCATION}/include/torch/csrc/api/include/)
+  set(TORCH_LIB_DIR ${TORCH_LOCATION}/lib/)
 endif()
 
 # XGBoost
