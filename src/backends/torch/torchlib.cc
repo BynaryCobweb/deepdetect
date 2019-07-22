@@ -66,6 +66,10 @@ namespace dd
 
         _device = gpu ? torch::Device("cuda") : torch::Device("cpu");
 
+        if (typeid(TInputConnectorStrategy) == typeid(TxtTorchInputFileConn)) {
+            _attention = true;
+        }
+
         _traced = torch::jit::load(this->_mlmodel._model_file);
         _traced->to(_device);
         _traced->eval();
@@ -96,8 +100,26 @@ namespace dd
         } catch (...) {
             throw;
         }
+        
+        if (typeid(TInputConnectorStrategy) == typeid(TxtTorchInputFileConn)) {
+            _attention = true;
+        }
 
-        Tensor output = _traced->forward({inputc._in.to(_device)}).toTensor();
+        std::vector<c10::IValue> in_vals;
+        in_vals.push_back(inputc._in.to(_device));
+
+        if (_attention) {
+            // token_type_ids
+            in_vals.push_back(torch::zeros_like(inputc._in, at::kLong).to(_device));
+            in_vals.push_back(inputc._attention_mask.to(_device));
+        }
+
+        c10::IValue out_val = _traced->forward(in_vals);
+
+        if (!out_val.isTensor()) {
+            throw MLLibInternalException("Model returned an invalid output. Please check your model.");
+        }
+        Tensor output = out_val.toTensor();
         output = torch::softmax(output, 1);
         
         // Output
@@ -139,4 +161,5 @@ namespace dd
 
 
     template class TorchLib<ImgTorchInputFileConn,SupervisedOutput,TorchModel>;
+    template class TorchLib<TxtTorchInputFileConn,SupervisedOutput,TorchModel>;
 }

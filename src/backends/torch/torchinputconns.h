@@ -46,7 +46,7 @@ namespace dd
         }
 
         at::Tensor _in;
-        std::vector<at::Tensor> _attention_mask;
+        at::Tensor _attention_mask;
     };
 
     class ImgTorchInputFileConn : public ImgInputFileConn, public TorchInputInterface
@@ -122,6 +122,18 @@ namespace dd
             : TxtInputFileConn(i), TorchInputInterface(i) {}
         ~TxtTorchInputFileConn() {}
 
+        // for API info only
+        int width() const
+        {
+            return _width;
+        }
+
+        // for API info only
+        int height() const
+        {
+            return _height;
+        }
+
         void transform(const APIData &ad)
         {
             try
@@ -133,7 +145,13 @@ namespace dd
                 throw;
             }
 
-            std::vector<int64_t> input_ids;
+            std::vector<int64_t> input_ids{
+                101, 2489, 4443, 1999, 1016, 1037, 1059, 2243, 2135, 4012, 2361,
+                2000, 2663, 6904, 2452, 2345, 1056, 25509, 2015, 7398, 2089, 2384,
+                1012, 3793, 6904, 2000, 6584, 12521, 2487, 2000, 4374, 4443, 3160,
+                1006, 2358, 2094, 19067, 2102, 3446, 1007, 1056, 1004, 1039, 1005,
+                1055, 6611, 5511, 19961, 22407, 18613, 23352, 7840, 15136, 1005, 1055, 102
+            };
 
             at::Tensor input_ids_tensor = toLongTensor(input_ids);
             at::Tensor input_mask_tensor = torch::ones_like(input_ids_tensor);
@@ -148,10 +166,12 @@ namespace dd
             //    token_type_ids_tensor, at::IntList{0, padding_size}, 0);
             
             _in = input_ids_tensor;
-            _attention_mask.push_back(input_mask_tensor);
+            _attention_mask = input_mask_tensor;
         }
 
     public:
+        int _width = 0;
+        int _height = 0;
         int64_t _input_size = 500;
     };
 } // namespace dd
