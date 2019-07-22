@@ -78,28 +78,31 @@ namespace dd
                 throw;
             }
 
+            std::vector<at::Tensor> tensors;
 
             for (const cv::Mat &bgr : this->_images) {
                 _height = bgr.rows;
                 _width = bgr.cols;
 
-                std::vector<int64_t> sizes{ 1, _height, _width, 3 };
+                std::vector<int64_t> sizes{ _height, _width, 3 };
                 at::TensorOptions options(at::ScalarType::Byte);
                 at::Tensor imgt = torch::from_blob(bgr.data, at::IntList(sizes), options);
-                imgt = imgt.toType(at::kFloat).mul(1./255.).permute({0, 3, 1, 2});
+                imgt = imgt.toType(at::kFloat).mul(1./255.).permute({2, 0, 1});
 
                 // bgr to rgb
                 at::Tensor indexes = torch::ones(3, at::kLong);
                 indexes[0] = 2;
                 indexes[2] = 0;
-                imgt = torch::index_select(imgt, 1, indexes);
+                imgt = torch::index_select(imgt, 0, indexes);
 
-                _in_tensors.push_back(imgt);
+                tensors.push_back(imgt);
             }
+
+            _in = torch::stack(tensors, 0);
         }
 
     public:
-        std::vector<at::Tensor> _in_tensors;
+        at::Tensor _in;
     };
 } // namespace dd
 

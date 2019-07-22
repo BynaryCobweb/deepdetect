@@ -97,16 +97,16 @@ namespace dd
             throw;
         }
 
+        Tensor output = _traced->forward({inputc._in.to(_device)}).toTensor();
+        output = torch::softmax(output, 1);
+        
+        // Output
         std::vector<APIData> results_ads;
 
-        for (auto &in : inputc._in_tensors) {
-            Tensor output = _traced->forward({in.to(_device)}).toTensor();
-            output = torch::softmax(output, 1);
-            std::tuple<Tensor, Tensor> sorted_output = output.sort(1, true);
-            
-            // Output
-            APIData results_ad; 
+        for (int i = 0; i < output.size(0); ++i) {
+            std::tuple<Tensor, Tensor> sorted_output = output.slice(0, i, i + 1).sort(1, true);
 
+            APIData results_ad;
             std::vector<double> probs;
             std::vector<std::string> cats;
 
