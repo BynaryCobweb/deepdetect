@@ -22,10 +22,12 @@
 #ifndef TORCHINPUTCONNS_H
 #define TORCHINPUTCONNS_H
 
+#include <vector>
+
+#include <torch/torch.h>
+
 #include "imginputfileconn.h"
 #include "txtinputfileconn.h"
-
-#include <vector>
 
 namespace dd
 {
@@ -33,16 +35,13 @@ namespace dd
     {
     public:
         TorchInputInterface() {}
-        TorchInputInterface(const TorchInputInterface &i)
-        {
-
-        }
+        TorchInputInterface(const TorchInputInterface &i) {}
 
         ~TorchInputInterface() {}
 
         torch::Tensor toLongTensor(std::vector<int64_t> &values) {
             int64_t val_size = values.size();
-            return torch::from_blob(&values[0], at::IntList{1, val_size}, at::kLong);
+            return torch::from_blob(&values[0], at::IntList{val_size}, at::kLong);
         }
 
         at::Tensor _in;
@@ -134,45 +133,12 @@ namespace dd
             return _height;
         }
 
-        void transform(const APIData &ad)
-        {
-            try
-            {
-                TxtInputFileConn::transform(ad);
-            }
-            catch(const std::exception& e)
-            {
-                throw;
-            }
-
-            std::vector<int64_t> input_ids{
-                101, 2489, 4443, 1999, 1016, 1037, 1059, 2243, 2135, 4012, 2361,
-                2000, 2663, 6904, 2452, 2345, 1056, 25509, 2015, 7398, 2089, 2384,
-                1012, 3793, 6904, 2000, 6584, 12521, 2487, 2000, 4374, 4443, 3160,
-                1006, 2358, 2094, 19067, 2102, 3446, 1007, 1056, 1004, 1039, 1005,
-                1055, 6611, 5511, 19961, 22407, 18613, 23352, 7840, 15136, 1005, 1055, 102
-            };
-
-            at::Tensor input_ids_tensor = toLongTensor(input_ids);
-            at::Tensor input_mask_tensor = torch::ones_like(input_ids_tensor);
-            // at::Tensor token_type_ids_tensor = torch::zeros_like(input_ids_tensor);
-            
-            int64_t padding_size = _input_size - input_ids_tensor.sizes().back();
-            input_ids_tensor = torch::constant_pad_nd(
-                input_ids_tensor, at::IntList{0, padding_size}, 0);
-            input_mask_tensor = torch::constant_pad_nd(
-                input_mask_tensor, at::IntList{0, padding_size}, 0);
-            // token_type_ids_tensor = torch::constant_pad_nd(
-            //    token_type_ids_tensor, at::IntList{0, padding_size}, 0);
-            
-            _in = input_ids_tensor;
-            _attention_mask = input_mask_tensor;
-        }
+        void transform(const APIData &ad);
 
     public:
         int _width = 0;
         int _height = 0;
-        int64_t _input_size = 500;
+        int64_t _in_size = 500;
     };
 } // namespace dd
 

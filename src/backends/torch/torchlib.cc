@@ -70,8 +70,7 @@ namespace dd
             _attention = true;
         }
 
-        _traced = torch::jit::load(this->_mlmodel._model_file);
-        _traced->to(_device);
+        _traced = torch::jit::load(this->_mlmodel._model_file, _device);
         _traced->eval();
     }
 
