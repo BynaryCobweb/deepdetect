@@ -42,6 +42,9 @@ namespace dd
     {
         this->_libname = "torch";
         _traced = std::move(tl._traced);
+        _nclasses = tl._nclasses;
+        _device = tl._device;
+        _attention = tl._attention;
     }
 
     template <class TInputConnectorStrategy, class TOutputConnectorStrategy, class TMLModel>
@@ -52,10 +55,9 @@ namespace dd
 
     /*- from mllib -*/
     template <class TInputConnectorStrategy, class TOutputConnectorStrategy, class TMLModel>
-    void TorchLib<TInputConnectorStrategy, TOutputConnectorStrategy, TMLModel>::init_mllib(const APIData &ad) 
+    void TorchLib<TInputConnectorStrategy, TOutputConnectorStrategy, TMLModel>::init_mllib(const APIData &lib_ad) 
     {
         bool gpu = false;
-        APIData lib_ad = ad.getobj("parameters").getobj("mllib");
 
         if (lib_ad.has("gpu")) {
             gpu = lib_ad.get("gpu").get<bool>() && torch::cuda::is_available();
@@ -98,10 +100,6 @@ namespace dd
             inputc.transform(ad);
         } catch (...) {
             throw;
-        }
-        
-        if (typeid(TInputConnectorStrategy) == typeid(TxtTorchInputFileConn)) {
-            _attention = true;
         }
 
         std::vector<c10::IValue> in_vals;
