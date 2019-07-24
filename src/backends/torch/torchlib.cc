@@ -29,6 +29,60 @@ using namespace torch;
 
 namespace dd
 {
+    // ======= TORCH MODULE
+
+
+    void add_parameters(std::shared_ptr<torch::jit::script::Module> module, std::vector<Tensor> &params) { 
+        for (const auto &slot : module->get_parameters()) {
+            params.push_back(slot.value().toTensor());
+        }
+        for (auto child : module->get_modules()) {
+            add_parameters(child, params);
+        }
+    }
+
+    c10::IValue TorchModule::forward(std::vector<c10::IValue> source) 
+    {
+        if (_traced)
+        {
+            source = { _traced->forward(source) };
+        }
+        c10::IValue out_val = source.at(0);
+        if (_classif)
+        {
+            if (!out_val.isTensor())
+                throw MLLibInternalException("Model returned an invalid output. Please check your model.");
+            out_val = _classif->forward(out_val.toTensor());
+        }
+        return out_val;
+    }
+
+    std::vector<Tensor> TorchModule::parameters() 
+    {
+        std::vector<Tensor> params;
+        if (_traced)
+            add_parameters(_traced, params);
+        if (_classif)
+        {
+            auto classif_params = _classif->parameters();
+            params.insert(params.end(), classif_params.begin(), classif_params.end());
+        }
+        return params;
+    }
+
+    void TorchModule::save(const std::string &filename) 
+    {
+       // Not yet implemented 
+    }
+
+    void TorchModule::load(const std::string &filename) 
+    {
+        // Not yet implemented
+    }
+
+
+    // ======= TORCHLIB
+
     template <class TInputConnectorStrategy, class TOutputConnectorStrategy, class TMLModel>
     TorchLib<TInputConnectorStrategy, TOutputConnectorStrategy, TMLModel>::TorchLib(const TorchModel &tmodel)
         : MLLib<TInputConnectorStrategy,TOutputConnectorStrategy,TorchModel>(tmodel) 
@@ -41,7 +95,7 @@ namespace dd
         : MLLib<TInputConnectorStrategy,TOutputConnectorStrategy,TorchModel>(std::move(tl))
     {
         this->_libname = "torch";
-        _traced = std::move(tl._traced);
+        _module = std::move(tl._module);
         _nclasses = tl._nclasses;
         _device = tl._device;
         _attention = tl._attention;
@@ -72,8 +126,8 @@ namespace dd
             _attention = true;
         }
 
-        _traced = torch::jit::load(this->_mlmodel._model_file, _device);
-        _traced->eval();
+        _module._traced = torch::jit::load(this->_mlmodel._model_file, _device);
+        _module._traced->eval();
     }
 
     template <class TInputConnectorStrategy, class TOutputConnectorStrategy, class TMLModel>
@@ -85,7 +139,69 @@ namespace dd
     template <class TInputConnectorStrategy, class TOutputConnectorStrategy, class TMLModel>
     int TorchLib<TInputConnectorStrategy, TOutputConnectorStrategy, TMLModel>::train(const APIData &ad, APIData &out) 
     {
-        
+        TInputConnectorStrategy inputc(this->_inputc);
+        try
+        {
+            inputc.transform(ad);
+        }
+        catch (...)
+        {
+            throw;
+        }
+
+        APIData ad_mllib = ad.getobj("parameters").getobj("mllib");
+
+        // solver params
+        int64_t iterations = 100;
+        std::string solver_type = "SGD";
+        int64_t base_lr = 0.0001;
+
+        if (ad_mllib.has("solver"))
+        {
+            APIData ad_solver = ad_mllib.getobj("solver");
+            if (ad_solver.has("iterations"))
+                iterations = ad_solver.get("iterations").get<int>();
+            if (ad_solver.has("solver_type"))
+                solver_type = ad_solver.get("solver_type").get<std::string>();
+            if (ad_solver.has("iterations"))
+                base_lr = ad_solver.get("base_lr").get<double>();
+        }
+
+        // create solver
+        // no care about solver type yet
+        optim::Adam optimizer(_module.parameters(), optim::AdamOptions(base_lr));
+
+        /* for (int64_t epoch = 0; epoch < iterations; ++epoch) {
+            int64_t batch_index = 0;
+            double loss_sum = 0;
+
+            for (BertTensorExample &example : *train_data) {
+                Tensor x = example.data["input_ids"].to(device);
+                Tensor att = example.data["attention"].to(device);
+                Tensor y = example.target.to(device);
+
+                Tensor y_pred = model(x, att);
+
+                auto loss = torch::mse_loss(y_pred, y);
+
+                optimizer.zero_grad();
+                loss.backward();
+                optimizer.step();
+
+                double loss_value = loss.item<double>();
+                loss_sum += loss_value;
+
+                if (batch_index % 20 == 0) {
+                    std::printf("E: %ld/%ld, B: %ld, loss = %f\n", epoch, EPOCH_COUNT, batch_index, loss.item<double>());
+                }
+                batch_index++;
+            }
+
+            std::cout << "Saving checkpoint. Loss=" << loss_sum / batch_index << std::endl;
+            model->save(MODEL_PATH);
+        }*/
+
+        return 0;
     }
 
     template <class TInputConnectorStrategy, class TOutputConnectorStrategy, class TMLModel>
@@ -93,6 +209,12 @@ namespace dd
     {
         APIData params = ad.getobj("parameters");
         APIData output_params = params.getobj("output");
+
+        if (output_params.has("measure"))
+        {
+            test(ad, out);
+            return 0;
+        } 
 
         TInputConnectorStrategy inputc(this->_inputc);
         TOutputConnectorStrategy outputc;
@@ -102,22 +224,12 @@ namespace dd
             throw;
         }
 
-        std::vector<c10::IValue> in_vals;
-        in_vals.push_back(inputc._in.to(_device));
-
-        if (_attention) {
-            // token_type_ids
-            in_vals.push_back(torch::zeros_like(inputc._in, at::kLong).to(_device));
-            in_vals.push_back(inputc._attention_mask.to(_device));
-        }
-
-        c10::IValue out_val = _traced->forward(in_vals);
-
-        if (!out_val.isTensor()) {
-            throw MLLibInternalException("Model returned an invalid output. Please check your model.");
-        }
-        Tensor output = out_val.toTensor();
-        output = torch::softmax(output, 1);
+        // TODO less boilerplate
+        // FIXME an assert can fail while accessing optional (dede crash)
+        inputc._dataset.reset();
+        auto data = inputc._dataset.get_batch(std::vector<size_t>{*inputc._dataset.size()})->data;
+        std::vector<c10::IValue> in_vals{data.begin(), data.end()};
+        Tensor output = torch::softmax(_module.forward(in_vals).toTensor(), 1);
         
         // Output
         std::vector<APIData> results_ads;
@@ -156,6 +268,63 @@ namespace dd
         return 0;
     }
 
+    template <class TInputConnectorStrategy, class TOutputConnectorStrategy, class TMLModel>
+    int TorchLib<TInputConnectorStrategy, TOutputConnectorStrategy, TMLModel>::test(const APIData &ad, APIData &out) 
+    {
+        /* APIData ad_res;
+        APIData ad_out = ad.getobj("params").getobj("output");
+
+        TInputConnectorStrategy inputc(this->_inputc);
+        TOutputConnectorStrategy outputc;
+        try {
+            inputc.transform(ad);
+        } catch (...) {
+            throw;
+        }
+
+        at::Tensor &labels = inputc._labels;
+        int test_size = labels.size(0);
+
+        int batch_size = 5;
+        int batch_count = (test_size - 1 / batch_size + 1;
+
+        double valid = 0;
+
+        for (int i = 0; i < batch_count; ++i) {
+            int slice_start = i * batch_size;
+            int slice_end = (i+1) * batch_size;
+
+            if (slice_end > test_size) {
+                slice_end = test_size;
+            }
+
+            std::vector<c10::IValue> in_vals;
+            in_vals.push_back(inputc._in.to(_device).slice(0, slice_start, slice_end));
+
+            if (_attention) {
+                // token_type_ids
+                in_vals.push_back(torch::zeros_like(inputc._in, at::kLong).to(_device)
+                    .slice(0, slice_start, slice_end));
+                in_vals.push_back(inputc._attention_mask.to(_device)
+                    .slice(0, slice_start, slice_end));
+            }
+
+            Tensor output = run_classification_model(in_vals);
+            Tensor max_ids = output.argmax(1).to(kLong);
+            Tensor labels = inputc._labels.slice(slice_start, slice_end).to(kLong);
+
+            for (int j = 0; j < max_ids.size(0); ++j) {
+                if (labels[j].item<int64_t>() == max_ids[j].item<int64_t>()) {
+                    ++valid;
+                }
+            }
+        }
+
+        double accuracy = valid / test_size * 100;
+        ad_res.add("acc", accuracy);
+        SupervisedOutput::measure(ad_res, ad_out, out);*/
+        return 0;
+    }
 
     template class TorchLib<ImgTorchInputFileConn,SupervisedOutput,TorchModel>;
     template class TorchLib<TxtTorchInputFileConn,SupervisedOutput,TorchModel>;

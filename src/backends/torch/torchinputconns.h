@@ -31,6 +31,31 @@
 
 namespace dd
 {
+    typedef torch::data::Example<std::vector<at::Tensor>, std::vector<at::Tensor>> TorchBatch;
+
+    class TorchDataset : public torch::data::BatchDataset
+        <TorchDataset, c10::optional<TorchBatch>>
+    {
+    private:
+        std::vector<int64_t> _indices;
+
+    public:
+        std::vector<TorchBatch> _batches;
+
+
+        TorchDataset() {}
+
+        void reset();
+
+        c10::optional<size_t> size() const override {
+            return _batches.size();
+        }
+
+        c10::optional<TorchBatch> get_batch(BatchRequestType request) override;
+    };
+
+
+
     class TorchInputInterface
     {
     public:
@@ -44,8 +69,8 @@ namespace dd
             return torch::from_blob(&values[0], at::IntList{val_size}, at::kLong);
         }
 
-        at::Tensor _in;
-        at::Tensor _attention_mask;
+        TorchDataset _dataset;
+        TorchDataset _test_dataset;
     };
 
     class ImgTorchInputFileConn : public ImgInputFileConn, public TorchInputInterface
@@ -85,8 +110,6 @@ namespace dd
                 throw;
             }
 
-            std::vector<at::Tensor> tensors;
-
             for (const cv::Mat &bgr : this->_images) {
                 _height = bgr.rows;
                 _width = bgr.cols;
@@ -102,10 +125,8 @@ namespace dd
                 indexes[2] = 0;
                 imgt = torch::index_select(imgt, 0, indexes);
 
-                tensors.push_back(imgt);
+                _dataset._batches.push_back(TorchBatch({imgt}, {}));
             }
-
-            _in = torch::stack(tensors, 0);
         }
 
     public:
@@ -138,6 +159,7 @@ namespace dd
     public:
         int _width = 0;
         int _height = 0;
+        int _test_batch_size = 1;
         int64_t _in_size = 500;
     };
 } // namespace dd
