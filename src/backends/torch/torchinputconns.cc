@@ -53,7 +53,7 @@ void TxtTorchInputFileConn::transform(const APIData &ad) {
 
             for (const std::string &token : tokenizer._tokens)
             {
-                if ((it = _vocab.find(word)) != _vocab.end())
+                if ((it = _vocab.find(token)) != _vocab.end())
                 {
                     ids.push_back(it->second._pos);
                 }
