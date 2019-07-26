@@ -38,22 +38,12 @@ public:
 
     WordPieceTokenizer() {}
 
-    template <typename VocabType>
-    void tokenize(const std::string &input, const VocabType& vocab)
-    {
+    void reset() {
         _tokens.clear();
-        boost::char_separator<char> sep("\n\t\f\r ");
-        boost::tokenizer<boost::char_separator<char>> base_tokens(input, sep);
-
-        for (std::string word : base_tokens)
-        {
-            tokenize_word(word, vocab);
-        }
     }
 
-private:
     template <typename VocabType>
-    void tokenize_word(const std::string &word, const VocabType& vocab)
+    void append_input(const std::string &word, const VocabType& vocab)
     {
         int start = 0;
         std::vector<std::string> subtokens;
@@ -96,6 +86,7 @@ private:
         }
     }
 
+private:
     template <typename VocabType>
     bool in_vocab(const std::string &tok, const VocabType& vocab)
     {

@@ -17,8 +17,6 @@ void TxtTorchInputFileConn::transform(const APIData &ad) {
     if (!_ordered_words || _characters)
         throw InputConnectorBadParamException("Need ordered_words = true");
 
-    WordPieceTokenizer tokenizer;
-
     int cls_pos = _vocab.at("[CLS]")._pos;
     int sep_pos = _vocab.at("[SEP]")._pos;
     int unk_pos = _vocab.at("[UNK]")._pos;
@@ -48,19 +46,15 @@ void TxtTorchInputFileConn::transform(const APIData &ad) {
             std::string word;
             double val;
             tow->get_next_elt(word, val);
-            tokenizer.tokenize(word, _vocab);
             std::unordered_map<std::string,Word>::iterator it;
-
-            for (const std::string &token : tokenizer._tokens)
+                
+            if ((it = _vocab.find(word)) != _vocab.end())
             {
-                if ((it = _vocab.find(token)) != _vocab.end())
-                {
-                    ids.push_back(it->second._pos);
-                }
-                else
-                {
-                    ids.push_back(unk_pos);
-                }
+                ids.push_back(it->second._pos);
+            }
+            else
+            {
+                ids.push_back(unk_pos);
             }
         }
 

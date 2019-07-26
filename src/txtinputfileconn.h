@@ -221,7 +221,7 @@ namespace dd
     TxtInputFileConn()
       :InputConnectorStrategy() {}
     TxtInputFileConn(const TxtInputFileConn &i)
-      :InputConnectorStrategy(i),_iterator(i._iterator),_tokenizer(i._tokenizer),_count(i._count),_tfidf(i._tfidf),_min_count(i._min_count),_min_word_length(i._min_word_length),_sentences(i._sentences),_characters(i._characters),_alphabet_str(i._alphabet_str),_alphabet(i._alphabet),_sequence(i._sequence),_seq_forward(i._seq_forward),_vocab(i._vocab) {}
+      :InputConnectorStrategy(i),_iterator(i._iterator),_count(i._count),_tfidf(i._tfidf),_min_count(i._min_count),_min_word_length(i._min_word_length),_sentences(i._sentences),_characters(i._characters),_alphabet_str(i._alphabet_str),_alphabet(i._alphabet),_sequence(i._sequence),_seq_forward(i._seq_forward),_vocab(i._vocab) {}
     ~TxtInputFileConn()
       {
 	destroy_txt_entries(_txt);
@@ -257,6 +257,10 @@ namespace dd
 	_characters = ad_input.get("characters").get<bool>();
       if (ad_input.has("ordered_words"))
 	_ordered_words = ad_input.get("ordered_words").get<bool>();
+      if (ad_input.has("wordpiece_tokens"))
+	_wordpiece_tokens = ad_input.get("wordpiece_tokens").get<bool>();
+      if (ad_input.has("ponctuation_tokens"))
+	_ponctuation_tokens = ad_input.get("ponctuation_tokens").get<bool>();
       if (ad_input.has("alphabet"))
 	_alphabet_str = ad_input.get("alphabet").get<std::string>();
       if (_characters)
@@ -378,7 +382,6 @@ namespace dd
     
     // options
     std::string _iterator = "document";
-    std::string _tokenizer = "bow";
     bool _shuffle = false;
     int _seed = -1;
     double _test_split = 0.0;
@@ -389,6 +392,8 @@ namespace dd
     bool _sentences = false; /**< whether to consider every sentence (\n separated) as a document. */
     bool _characters = false; /**< whether to use character-level input features. */
     bool _ordered_words = false; /**< whether to consider the position of each words in the sentence. */
+    bool _wordpiece_tokens = false; /**< whether to try to match word pieces from the vocabulary. */
+    bool _ponctuation_tokens = false; /**< accept punctuation tokens. */
     std::string _alphabet_str = "abcdefghijklmnopqrstuvwxyz0123456789,;.!?:'\"/\\|_@#$%^&*~`+-=<>()[]{}";
     std::unordered_map<uint32_t,int> _alphabet; /**< character-level alphabet. */
     int _sequence = 60; /**< sequence size when using character-level features. */

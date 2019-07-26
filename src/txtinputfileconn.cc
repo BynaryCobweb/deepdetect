@@ -22,6 +22,7 @@
 #include "txtinputfileconn.h"
 #include "utils/fileops.hpp"
 #include "utils/utils.hpp"
+#include "wordpiecetoken.h"
 #include <boost/tokenizer.hpp>
 #include <iostream>
 
@@ -256,15 +257,52 @@ namespace dd
 	std::transform(ct.begin(),ct.end(),ct.begin(),::tolower);
 	if (!_characters)
 	  {
-	    std::unordered_map<std::string,Word>::iterator vhit;
-	    boost::char_separator<char> sep("\n\t\f\r ,.;:`'!?)(-|><^·&\"\\/{}#$–=+");
-	    boost::tokenizer<boost::char_separator<char>> tokens(ct,sep);
+            std::unordered_map<std::string,Word>::iterator vhit;
+            std::vector<std::string> tokens;
+            if (_ponctuation_tokens)
+            {
+                boost::char_separator<char> sep("\n\t\f\r ");
+                boost::tokenizer<boost::char_separator<char>> tokenizer(ct,sep);
+
+                // Split punctuation
+                std::string ponctuation_str = ",.;:`'!?)(-|><^·&\"\\/{}#$–=+[]%*";
+                std::unordered_set<char> ponctuation{ponctuation_str.begin(), ponctuation_str.end()};
+                for (std::string token : tokenizer)
+                {
+                    int start = 0;
+                    for (int i = 0; i < token.size(); ++i)
+                    {
+                        if (ponctuation.find(token[i]) != ponctuation.end())
+                        {
+                            if (i != start)
+                                tokens.push_back(token.substr(start, i - start));
+                            tokens.push_back(token.substr(i, 1));
+                            start = i + 1;
+                        }
+                    }
+                    if (start != token.size())
+                        tokens.push_back(token.substr(start));
+                }
+            }
+            else
+            {
+                boost::char_separator<char> sep("\n\t\f\r ,.;:`'!?)(-|><^·&\"\\/{}#$–=+");
+                boost::tokenizer<boost::char_separator<char>> tokenizer(ct,sep);
+                tokens.insert(tokens.end(), tokenizer.begin(), tokenizer.end());
+            }
+            if (_wordpiece_tokens)
+            {
+                WordPieceTokenizer tokenizer;
+                for (const std::string &token : tokens)
+                {
+                    tokenizer.append_input(token, _vocab);
+                }
+                tokens = std::move(tokenizer._tokens);
+            }
 
             if (_ordered_words) 
               {
                 TxtOrderedWordsEntry *towe = new TxtOrderedWordsEntry(target);
-                std::unordered_map<std::string,Word>::iterator vhit;
-
                 for (std::string w : tokens)
                   {
                     towe->add_word(w, 0);
