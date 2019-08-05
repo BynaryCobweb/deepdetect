@@ -228,7 +228,9 @@ namespace dd
         // FIXME an assert can fail while accessing optional (dede crash)
         inputc._dataset.reset();
         auto data = inputc._dataset.get_batch(std::vector<size_t>{*inputc._dataset.size()})->data;
-        std::vector<c10::IValue> in_vals{data.begin(), data.end()};
+        std::vector<c10::IValue> in_vals;
+        for (Tensor tensor : data)
+            in_vals.push_back(tensor.to(_device));
         Tensor output = torch::softmax(_module.forward(in_vals).toTensor(), 1);
         
         // Output
