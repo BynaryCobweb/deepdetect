@@ -66,11 +66,8 @@ namespace dd
 
         int test(const APIData &ad, APIData &out);
 
-        at::Tensor run_classification_model(std::vector<c10::IValue> &in_vals);
-
     public:
         int _nclasses = 0;
-        bool _attention = false;
         torch::Device _device = torch::Device("cpu");
 
         // models

@@ -37,6 +37,8 @@ namespace dd
         <TorchDataset, c10::optional<TorchBatch>>
     {
     private:
+        bool _shuffle = false;
+        long _seed = -1;
         std::vector<int64_t> _indices;
 
     public:
@@ -45,13 +47,21 @@ namespace dd
 
         TorchDataset() {}
 
+        void add_batch(std::vector<at::Tensor> data, std::vector<at::Tensor> target = {});
+
         void reset();
 
+        // Size of data loaded in memory
+        size_t cache_size() const { return _batches.size(); }
+
         c10::optional<size_t> size() const override {
-            return _batches.size();
+            return cache_size();
         }
 
         c10::optional<TorchBatch> get_batch(BatchRequestType request) override;
+
+        // Returns a batch containing all the cached data
+        TorchBatch get_cached();
     };
 
 

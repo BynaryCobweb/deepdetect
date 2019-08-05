@@ -6,6 +6,12 @@ namespace dd {
 
 using namespace torch;
 
+
+void TorchDataset::add_batch(std::vector<at::Tensor> data, std::vector<at::Tensor> target)
+{
+    _batches.push_back(TorchBatch(data, target));
+}
+
 void TorchDataset::reset()
 {
     _indices.clear();
@@ -14,7 +20,11 @@ void TorchDataset::reset()
         _indices.push_back(i);
     }
 
-    // std::shuffle(_indices.begin(), _indices.end(), std::mt19937());
+    if (_shuffle)
+    {
+        auto seed = _seed == -1 ? static_cast<long>(time(NULL)) : _seed;
+        std::shuffle(_indices.begin(), _indices.end(), std::mt19937(seed));
+    }
 }
 
 c10::optional<TorchBatch> TorchDataset::get_batch(BatchRequestType request)
@@ -58,6 +68,14 @@ c10::optional<TorchBatch> TorchDataset::get_batch(BatchRequestType request)
         target_tensors.push_back(torch::stack(vec));
 
     return TorchBatch{ data_tensors, target_tensors };
+}
+
+TorchBatch TorchDataset::get_cached() {
+    reset();
+    auto batch = get_batch({cache_size()});
+    if (!batch)
+        throw InputConnectorInternalException("No data provided");
+    return batch.value();
 }
 
 
@@ -126,7 +144,7 @@ void TxtTorchInputFileConn::transform(const APIData &ad) {
         token_type_ids_tensor = torch::constant_pad_nd(
             token_type_ids_tensor, at::IntList{0, padding_size}, 0);
 
-        _dataset._batches.push_back(TorchBatch({ids_tensor, token_type_ids_tensor, mask_tensor}, {}));
+        _dataset.add_batch({ids_tensor, token_type_ids_tensor, mask_tensor}, {});
     }
 }
 

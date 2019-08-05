@@ -41,6 +41,12 @@ namespace dd
         }
     }
 
+    Tensor to_tensor_safe(const IValue &value) {
+        if (!value.isTensor())
+            throw MLLibInternalException("Model returned an invalid output. Please check your model.");
+        return value.toTensor();
+    }
+
     c10::IValue TorchModule::forward(std::vector<c10::IValue> source) 
     {
         if (_traced)
@@ -50,9 +56,7 @@ namespace dd
         c10::IValue out_val = source.at(0);
         if (_classif)
         {
-            if (!out_val.isTensor())
-                throw MLLibInternalException("Model returned an invalid output. Please check your model.");
-            out_val = _classif->forward(out_val.toTensor());
+            out_val = _classif->forward(to_tensor_safe(out_val));
         }
         return out_val;
     }
@@ -98,7 +102,6 @@ namespace dd
         _module = std::move(tl._module);
         _nclasses = tl._nclasses;
         _device = tl._device;
-        _attention = tl._attention;
     }
 
     template <class TInputConnectorStrategy, class TOutputConnectorStrategy, class TMLModel>
@@ -123,7 +126,7 @@ namespace dd
         _device = gpu ? torch::Device("cuda") : torch::Device("cpu");
 
         if (typeid(TInputConnectorStrategy) == typeid(TxtTorchInputFileConn)) {
-            _attention = true;
+            //_attention = true;
         }
 
         _module._traced = torch::jit::load(this->_mlmodel._model_file, _device);
@@ -171,11 +174,17 @@ namespace dd
         // no care about solver type yet
         optim::Adam optimizer(_module.parameters(), optim::AdamOptions(base_lr));
 
-        /* for (int64_t epoch = 0; epoch < iterations; ++epoch) {
+        /*/ create dataloader
+        auto dataloader = torch::data::make_data_loader(
+            std::move(inputc._dataset),
+            data::DataLoaderOptions(batch_size)
+        );
+
+        for (int64_t epoch = 0; epoch < iterations; ++epoch) {
             int64_t batch_index = 0;
             double loss_sum = 0;
 
-            for (BertTensorExample &example : *train_data) {
+            for (TorchBatch &example : *train_data) {
                 Tensor x = example.data["input_ids"].to(device);
                 Tensor att = example.data["attention"].to(device);
                 Tensor y = example.target.to(device);
@@ -224,14 +233,11 @@ namespace dd
             throw;
         }
 
-        // TODO less boilerplate
-        // FIXME an assert can fail while accessing optional (dede crash)
         inputc._dataset.reset();
-        auto data = inputc._dataset.get_batch(std::vector<size_t>{*inputc._dataset.size()})->data;
         std::vector<c10::IValue> in_vals;
-        for (Tensor tensor : data)
+        for (Tensor tensor : inputc._dataset.get_cached().data)
             in_vals.push_back(tensor.to(_device));
-        Tensor output = torch::softmax(_module.forward(in_vals).toTensor(), 1);
+        Tensor output = torch::softmax(to_tensor_safe(_module.forward(in_vals)), 1);
         
         // Output
         std::vector<APIData> results_ads;
@@ -273,47 +279,38 @@ namespace dd
     template <class TInputConnectorStrategy, class TOutputConnectorStrategy, class TMLModel>
     int TorchLib<TInputConnectorStrategy, TOutputConnectorStrategy, TMLModel>::test(const APIData &ad, APIData &out) 
     {
-        /* APIData ad_res;
+        APIData ad_res;
         APIData ad_out = ad.getobj("params").getobj("output");
 
         TInputConnectorStrategy inputc(this->_inputc);
         TOutputConnectorStrategy outputc;
-        try {
+        try
+        {
             inputc.transform(ad);
-        } catch (...) {
+        }
+        catch (...)
+        {
             throw;
         }
 
-        at::Tensor &labels = inputc._labels;
-        int test_size = labels.size(0);
-
-        int batch_size = 5;
-        int batch_count = (test_size - 1 / batch_size + 1;
-
+        int test_size = inputc._dataset.cache_size();
+        int batch_size = inputc.test_batch_size();
+        // int batch_count = (test_size - 1) / batch_size + 1;
+        // <!> std::move may lead to unexpected behaviour from the input connector
+        auto dataloader = torch::data::make_data_loader(
+            std::move(inputc._dataset),
+            data::DataLoaderOptions(batch_size)
+        );
         double valid = 0;
 
-        for (int i = 0; i < batch_count; ++i) {
-            int slice_start = i * batch_size;
-            int slice_end = (i+1) * batch_size;
-
-            if (slice_end > test_size) {
-                slice_end = test_size;
-            }
-
+        for (TorchBatch &batch : *dataloader)
+        {
             std::vector<c10::IValue> in_vals;
-            in_vals.push_back(inputc._in.to(_device).slice(0, slice_start, slice_end));
-
-            if (_attention) {
-                // token_type_ids
-                in_vals.push_back(torch::zeros_like(inputc._in, at::kLong).to(_device)
-                    .slice(0, slice_start, slice_end));
-                in_vals.push_back(inputc._attention_mask.to(_device)
-                    .slice(0, slice_start, slice_end));
-            }
-
-            Tensor output = run_classification_model(in_vals);
+            for (Tensor tensor : batch.data)
+                in_vals.push_back(tensor.to(_device));
+            Tensor output = torch::softmax(to_tensor_safe(_module.forward(in_vals)), 1);
             Tensor max_ids = output.argmax(1).to(kLong);
-            Tensor labels = inputc._labels.slice(slice_start, slice_end).to(kLong);
+            Tensor labels = batch.target.at(0);
 
             for (int j = 0; j < max_ids.size(0); ++j) {
                 if (labels[j].item<int64_t>() == max_ids[j].item<int64_t>()) {
@@ -322,9 +319,9 @@ namespace dd
             }
         }
 
-        double accuracy = valid / test_size * 100;
+        double accuracy = valid / test_size;
         ad_res.add("acc", accuracy);
-        SupervisedOutput::measure(ad_res, ad_out, out);*/
+        SupervisedOutput::measure(ad_res, ad_out, out);
         return 0;
     }
 
