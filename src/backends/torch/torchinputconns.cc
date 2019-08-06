@@ -92,6 +92,14 @@ void TxtTorchInputFileConn::transform(const APIData &ad) {
     if (!_ordered_words || _characters)
         throw InputConnectorBadParamException("Need ordered_words = true");
 
+    fill_dataset(_dataset, _txt);
+    if (!_test_dataset.empty())
+        fill_dataset(_test_dataset, _test_txt);
+}
+
+void TxtTorchInputFileConn::fill_dataset(TorchDataset &dataset, 
+                                         const std::vector<TxtEntry<double>*> &entries)
+{
     int cls_pos = _vocab.at("[CLS]")._pos;
     int sep_pos = _vocab.at("[SEP]")._pos;
     int unk_pos = _vocab.at("[UNK]")._pos;
