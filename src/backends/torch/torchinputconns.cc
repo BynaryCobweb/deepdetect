@@ -152,7 +152,15 @@ void TxtTorchInputFileConn::fill_dataset(TorchDataset &dataset,
         token_type_ids_tensor = torch::constant_pad_nd(
             token_type_ids_tensor, at::IntList{0, padding_size}, 0);
 
-        _dataset.add_batch({ids_tensor, token_type_ids_tensor, mask_tensor}, {});
+        std::vector<Tensor> target_vec;
+        int target_val = static_cast<int>(tow->_target);
+        if (target_val != -1)
+        {
+            Tensor target_tensor = torch::full(1, target_val, torch::kLong);
+            target_vec.push_back(target_tensor);
+        }
+
+        _dataset.add_batch({ids_tensor, token_type_ids_tensor, mask_tensor}, std::move(target_vec));
     }
 }
 

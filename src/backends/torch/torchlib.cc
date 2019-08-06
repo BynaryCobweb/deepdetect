@@ -41,10 +41,29 @@ namespace dd
     /// Convert IValue to Tensor and throw an exception if the IValue is not a Tensor.
     Tensor to_tensor_safe(const IValue &value) {
         if (!value.isTensor())
-            throw MLLibInternalException("Model returned an invalid output. Please check your model.");
+            throw MLLibInternalException("Expected Tensor, found " + value.tagKind());
         return value.toTensor();
     }
+ 
+    /// Convert id Tensor to one_hot Tensor
+    void fill_one_hot(Tensor &one_hot, Tensor ids, int nclasses)
+    {
+        one_hot.zero_();
+        for (int i = 0; i < ids.size(0); ++i)
+        {
+            one_hot[i][ids[i].item<int>()] = 1;
+        }
+    }
 
+    Tensor to_one_hot(Tensor ids, int nclasses)
+    {
+        Tensor one_hot = torch::zeros(IntList{ids.size(0), nclasses});
+        for (int i = 0; i < ids.size(0); ++i)
+        {
+            one_hot[i][ids[i].item<int>()] = 1;
+        }
+        return one_hot;
+    }
 
     // ======= TORCH MODULE
 
@@ -168,6 +187,7 @@ namespace dd
         int64_t test_batch_size = 1;
         int64_t test_interval = 1;
         int64_t save_period = 0;
+        int64_t log_batch_period = 20;
 
         if (ad_mllib.has("iterations"))
             iterations = ad_mllib.get("iterations").get<int>();
@@ -193,10 +213,13 @@ namespace dd
             std::move(inputc._dataset),
             data::DataLoaderOptions(batch_size)
         );
+        this->_logger->info("Training for {} iterations", iterations);
 
         for (int64_t epoch = 0; epoch < iterations; ++epoch)
         {
             this->add_meas("iteration", epoch);
+            this->_logger->info("Iteration {}", epoch);
+            int batch_id = 0;
 
             for (TorchBatch &example : *dataloader)
             {
@@ -204,13 +227,20 @@ namespace dd
                 for (Tensor tensor : example.data)
                     in_vals.push_back(tensor.to(_device));
                 Tensor y_pred = to_tensor_safe(_module.forward(in_vals));
-                Tensor y = example.target.at(0).to(_device);
+                Tensor y = to_one_hot(example.target.at(0), _nclasses).to(_device);
+
                 // TODO let loss be a parameter
                 auto loss = torch::mse_loss(y_pred, y);
 
                 optimizer.zero_grad();
                 loss.backward();
                 optimizer.step();
+
+                if (batch_id % log_batch_period == 0)
+                {
+                    this->_logger->info("Batch {}: loss is {}", loss.item<double>());
+                }
+                ++batch_id;
             }
 
             if (epoch > 0 && epoch % test_interval == 0 && !inputc._test_dataset.empty())
@@ -224,6 +254,7 @@ namespace dd
                 for (auto name : meas_names)
                 {
 		            double mval = meas_obj.get(name).get<double>();
+                    this->_logger->info("{}={}", name, mval);
                     this->add_meas(name, mval);
                     this->add_meas_per_iter(name, mval);
                 }
@@ -231,6 +262,7 @@ namespace dd
 
             if (save_period != 0 && epoch % save_period == 0)
             {
+                this->_logger->info("Saving checkpoint after {} iterations", epoch);
                 _module.save_checkpoint(this->_mlmodel, std::to_string(epoch));
             }
         }
@@ -326,7 +358,9 @@ namespace dd
                 in_vals.push_back(tensor.to(_device));
             Tensor output = torch::softmax(to_tensor_safe(_module.forward(in_vals)), 1);
             Tensor max_ids = output.argmax(1).to(kLong);
-            Tensor labels = batch.target.at(0);
+            if (batch.target.empty())
+                throw MLLibBadParamException("Missing label on data while testing");
+            Tensor labels = batch.target[0];
 
             for (int j = 0; j < max_ids.size(0); ++j) {
                 if (labels[j].item<int64_t>() == max_ids[j].item<int64_t>()) {
