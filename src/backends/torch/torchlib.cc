@@ -182,12 +182,13 @@ namespace dd
         // solver params
         int64_t iterations = 100;
         std::string solver_type = "SGD";
-        int64_t base_lr = 0.0001;
+        double base_lr = 0.0001;
         int64_t batch_size = 5;
         int64_t test_batch_size = 1;
         int64_t test_interval = 1;
         int64_t save_period = 0;
-        int64_t log_batch_period = 20;
+        int64_t log_batch_period = 1;
+        int64_t batch_count = (inputc._dataset.cache_size() - 1) / batch_size + 1;
 
         if (ad_mllib.has("iterations"))
             iterations = ad_mllib.get("iterations").get<int>();
@@ -238,7 +239,7 @@ namespace dd
 
                 if (batch_id % log_batch_period == 0)
                 {
-                    this->_logger->info("Batch {}: loss is {}", loss.item<double>());
+                    this->_logger->info("Batch {}/{}: loss is {}", batch_id, batch_count, loss.item<double>());
                 }
                 ++batch_id;
             }
@@ -260,13 +261,21 @@ namespace dd
                 }
             }
 
-            if (save_period != 0 && epoch % save_period == 0)
+            if (save_period != 0 && (epoch + 1) % save_period == 0)
             {
-                this->_logger->info("Saving checkpoint after {} iterations", epoch);
-                _module.save_checkpoint(this->_mlmodel, std::to_string(epoch));
+                this->_logger->info("Saving checkpoint after {} iterations", epoch + 1);
+                _module.save_checkpoint(this->_mlmodel, std::to_string(epoch + 1));
             }
         }
 
+        test(ad, inputc._test_dataset, 1, out);
+
+        this->_logger->info("Saving last checkpoint...");
+        _module.save_checkpoint(this->_mlmodel, "final");
+
+        // TODO make model ready for predict after training
+        
+        this->_logger->info("Training done.");
         return 0;
     }
 
