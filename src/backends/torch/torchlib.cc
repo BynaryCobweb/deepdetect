@@ -349,28 +349,33 @@ namespace dd
             std::move(dataset),
             data::DataLoaderOptions(batch_size)
         );
-        double valid = 0;
 
+        int entry_id = 0;
         for (TorchBatch &batch : *dataloader)
         {
             std::vector<c10::IValue> in_vals;
             for (Tensor tensor : batch.data)
                 in_vals.push_back(tensor.to(_device));
             Tensor output = torch::softmax(to_tensor_safe(_module.forward(in_vals)), 1);
-            Tensor max_ids = output.argmax(1).to(kLong);
             if (batch.target.empty())
                 throw MLLibBadParamException("Missing label on data while testing");
             Tensor labels = batch.target[0];
-
-            for (int j = 0; j < max_ids.size(0); ++j) {
-                if (labels[j].item<int64_t>() == max_ids[j].item<int64_t>()) {
-                    ++valid;
+            
+            for (int j = 0; j < labels.size(0); ++j) {
+                APIData bad;
+                std::vector<double> predictions;
+                for (int c = 0; c < _nclasses; c++)
+                {
+                    predictions.push_back(output[j][c].item<double>());
                 }
+                bad.add("target", labels[j].item<int>());
+                bad.add("pred", predictions);
+                ad_res.add(std::to_string(entry_id), bad);
+                ++entry_id;
             }
         }
 
-        double accuracy = valid / test_size;
-        ad_res.add("acc", accuracy);
+        ad_res.batch_size("batch_size", entry_id);
         SupervisedOutput::measure(ad_res, ad_out, out);
         return 0;
     }
