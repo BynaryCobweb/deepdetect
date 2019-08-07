@@ -286,7 +286,10 @@ namespace dd
 
         if (output_params.has("measure"))
         {
-            test(ad, inputc._dataset, 1, out);
+            APIData meas_out;
+            test(ad, inputc._dataset, 1, meas_out);
+            meas_out.erase("iteration");
+            out.add("measure", meas_out.getobj("measure"));
             return 0;
         }
 
@@ -340,7 +343,7 @@ namespace dd
                                                                                     APIData &out) 
     {
         APIData ad_res;
-        APIData ad_out = ad.getobj("params").getobj("output");
+        APIData ad_out = ad.getobj("parameters").getobj("output");
         int test_size = dataset.cache_size();
         int batch_count = (test_size - 1) / batch_size + 1;
 
@@ -368,14 +371,20 @@ namespace dd
                 {
                     predictions.push_back(output[j][c].item<double>());
                 }
-                bad.add("target", labels[j].item<int>());
+                bad.add("target", labels[j].item<double>());
                 bad.add("pred", predictions);
                 ad_res.add(std::to_string(entry_id), bad);
                 ++entry_id;
             }
+            this->_logger->info("Testing: {} entries processed", entry_id);
         }
 
-        ad_res.batch_size("batch_size", entry_id);
+        std::vector<std::string> clnames;
+        for (int i=0;i<_nclasses;i++)
+            clnames.push_back(std::to_string(i));
+        ad_res.add("clnames", clnames);
+        ad_res.add("nclasses", _nclasses);
+        ad_res.add("batch_size", entry_id);
         SupervisedOutput::measure(ad_res, ad_out, out);
         return 0;
     }
