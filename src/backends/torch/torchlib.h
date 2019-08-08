@@ -42,10 +42,15 @@ namespace dd
 
         void save_checkpoint(TorchModel &model, const std::string &name);
 
-        void load_checkpoint(const std::string &name);
+        void load(TorchModel &model);
+
+        void eval();
+        void train();
     public:
         std::shared_ptr<torch::jit::script::Module> _traced;
         torch::nn::Linear _classif = nullptr;
+
+        torch::Device _device;
     };
 
 
@@ -71,6 +76,7 @@ namespace dd
 
     public:
         int _nclasses = 0;
+        std::string _template;
         torch::Device _device = torch::Device("cpu");
 
         // models
