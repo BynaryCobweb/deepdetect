@@ -168,6 +168,8 @@ namespace dd
     int TorchLib<TInputConnectorStrategy, TOutputConnectorStrategy, TMLModel>::train(const APIData &ad, APIData &out) 
     {
         TInputConnectorStrategy inputc(this->_inputc);
+        inputc._train = true;
+
         try
         {
             inputc.transform(ad);
@@ -187,8 +189,10 @@ namespace dd
         int64_t test_batch_size = 1;
         int64_t test_interval = 1;
         int64_t save_period = 0;
-        int64_t log_batch_period = 1;
         int64_t batch_count = (inputc._dataset.cache_size() - 1) / batch_size + 1;
+
+        // logging parameters
+        int64_t log_batch_period = 1;
 
         if (ad_mllib.has("iterations"))
             iterations = ad_mllib.get("iterations").get<int>();
@@ -204,6 +208,13 @@ namespace dd
             test_batch_size = ad_mllib.get("test_batch_size").get<int>();
         if (ad_mllib.has("save_period"))
             save_period = ad_mllib.get("save_period").get<int>();
+
+        // create dataset for evaluation during training
+        TorchDataset eval_dataset;
+        if (!inputc._test_dataset.empty())
+        {
+            eval_dataset = inputc._test_dataset; //.split(0, 0.1);
+        }
 
         // create solver
         // no care about solver type yet
@@ -232,23 +243,26 @@ namespace dd
 
                 // TODO let loss be a parameter
                 auto loss = torch::mse_loss(y_pred, y);
+                double loss_val = loss.item<double>();
 
                 optimizer.zero_grad();
                 loss.backward();
                 optimizer.step();
 
-                if (batch_id % log_batch_period == 0)
+                this->add_meas("train_loss", loss_val);
+                this->add_meas_per_iter("train_loss", loss_val);
+                if (log_batch_period != 0 && (batch_id + 1) % log_batch_period == 0)
                 {
-                    this->_logger->info("Batch {}/{}: loss is {}", batch_id, batch_count, loss.item<double>());
+                    this->_logger->info("Batch {}/{}: loss is {}", batch_id + 1, batch_count, loss_val);
                 }
                 ++batch_id;
             }
-
-            if (epoch > 0 && epoch % test_interval == 0 && !inputc._test_dataset.empty())
+            
+            if (epoch > 0 && epoch % test_interval == 0 && !eval_dataset.empty())
             {
                 APIData meas_out;
-                // TODO test only a part of the dataset
-                test(ad, inputc._test_dataset, test_batch_size, meas_out);
+                test(ad, eval_dataset, test_batch_size, meas_out);
+                eval_dataset = inputc._test_dataset; // XXX eval_dataset is moved. find a way to unmove it
 	            APIData meas_obj = meas_out.getobj("measure");
                 std::vector<std::string> meas_names = meas_obj.list_keys();
 
@@ -261,20 +275,19 @@ namespace dd
                 }
             }
 
-            if (save_period != 0 && (epoch + 1) % save_period == 0)
+            int64_t check_id = epoch + 1;
+            if ((save_period != 0 && check_id % save_period == 0) || check_id == iterations)
             {
-                this->_logger->info("Saving checkpoint after {} iterations", epoch + 1);
-                _module.save_checkpoint(this->_mlmodel, std::to_string(epoch + 1));
+                this->_logger->info("Saving checkpoint after {} iterations", check_id);
+                _module.save_checkpoint(this->_mlmodel, std::to_string(check_id));
             }
         }
 
-        test(ad, inputc._test_dataset, 1, out);
-
-        this->_logger->info("Saving last checkpoint...");
-        _module.save_checkpoint(this->_mlmodel, "final");
+        test(ad, inputc._test_dataset, test_batch_size, out);
 
         // TODO make model ready for predict after training
-        
+
+        inputc.response_params(out);
         this->_logger->info("Training done.");
         return 0;
     }
@@ -354,7 +367,6 @@ namespace dd
         APIData ad_res;
         APIData ad_out = ad.getobj("parameters").getobj("output");
         int test_size = dataset.cache_size();
-        int batch_count = (test_size - 1) / batch_size + 1;
 
         // <!> std::move may lead to unexpected behaviour from the input connector
         auto dataloader = torch::data::make_data_loader(
@@ -385,15 +397,17 @@ namespace dd
                 ad_res.add(std::to_string(entry_id), bad);
                 ++entry_id;
             }
-            this->_logger->info("Testing: {} entries processed", entry_id);
+            this->_logger->info("Testing: {}/{} entries processed", entry_id, test_size);
         }
 
+        ad_res.add("iteration",this->get_meas("iteration"));
+        ad_res.add("train_loss",this->get_meas("train_loss"));
         std::vector<std::string> clnames;
         for (int i=0;i<_nclasses;i++)
-            clnames.push_back(std::to_string(i));
+            clnames.push_back(this->_mlmodel.get_hcorresp(i));
         ad_res.add("clnames", clnames);
         ad_res.add("nclasses", _nclasses);
-        ad_res.add("batch_size", entry_id);
+        ad_res.add("batch_size", entry_id); // here batch_size = tested entries count
         SupervisedOutput::measure(ad_res, ad_out, out);
         return 0;
     }

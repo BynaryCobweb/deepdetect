@@ -66,7 +66,8 @@ namespace dd
 
         int predict(const APIData &ad, APIData &out);
 
-        int test(const APIData &ad, TorchDataset &dataset, int batch_size, APIData &out);
+        int test(const APIData &ad, TorchDataset &dataset, 
+                 int batch_size, APIData &out);
 
     public:
         int _nclasses = 0;

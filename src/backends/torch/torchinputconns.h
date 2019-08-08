@@ -64,6 +64,9 @@ namespace dd
 
         // Returns a batch containing all the cached data
         TorchBatch get_cached();
+
+        // Split a percentage of this dataset
+        TorchDataset split(double start, double stop);
     };
 
 
