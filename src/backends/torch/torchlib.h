@@ -51,6 +51,7 @@ namespace dd
         torch::nn::Linear _classif = nullptr;
 
         torch::Device _device;
+        int _classif_in = 0;/**<id of the input of the classification layer */
     };
 
 

@@ -154,7 +154,11 @@ namespace dd
         TxtTorchInputFileConn()
             : TxtInputFileConn() {}
         TxtTorchInputFileConn(const TxtTorchInputFileConn &i)
-            : TxtInputFileConn(i), TorchInputInterface(i) {}
+            : TxtInputFileConn(i), TorchInputInterface(i) 
+        {
+            _width = i._width;
+            _height = i._height;
+        }
         ~TxtTorchInputFileConn() {}
 
         // for API info only
@@ -173,10 +177,9 @@ namespace dd
 
         void fill_dataset(TorchDataset &dataset, const std::vector<TxtEntry<double>*> &entries);
     public:
-        int _width = 0;
+        /** width of the input tensor */
+        int _width = 512;
         int _height = 0;
-        int _test_batch_size = 1;
-        int64_t _in_size = 500;
     };
 } // namespace dd
 

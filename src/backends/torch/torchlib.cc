@@ -76,14 +76,18 @@ namespace dd
         {
             auto output = _traced->forward(source);
             if (output.isTensorList()) {
-                std::vector<Tensor> &elems = output.toTensorList()->elements();
+                auto &elems = output.toTensorList()->elements();
+                source = std::vector<c10::IValue>(elems.begin(), elems.end());
+            }
+            else if (output.isTuple()) {
+                auto &elems = output.toTuple()->elements();
                 source = std::vector<c10::IValue>(elems.begin(), elems.end());
             }
             else {
                 source = { output };
             }
         }
-        c10::IValue out_val = source.at(0);
+        c10::IValue out_val = source.at(_classif_in);
         if (_classif)
         {
             out_val = _classif->forward(to_tensor_safe(out_val));
@@ -196,6 +200,8 @@ namespace dd
             // XXX: dont hard code BERT output size
             _module._classif = nn::Linear(768, _nclasses);
             _module._classif->to(_device);
+
+            _module._classif_in = 1;
         }
 
         _module.load(this->_mlmodel);
@@ -235,7 +241,7 @@ namespace dd
         int64_t batch_count = (inputc._dataset.cache_size() - 1) / batch_size + 1;
 
         // logging parameters
-        int64_t log_batch_period = 1;
+        int64_t log_batch_period = 20;
 
         if (ad_mllib.has("iterations"))
             iterations = ad_mllib.get("iterations").get<int>();

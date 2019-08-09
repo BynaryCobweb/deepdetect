@@ -103,6 +103,13 @@ void TxtTorchInputFileConn::transform(const APIData &ad) {
     if (!_ordered_words || _characters)
         throw InputConnectorBadParamException("Need ordered_words = true");
 
+    if (ad.has("parameters") && ad.getobj("parameters").has("input"))
+    {
+        APIData ad_input = ad.getobj("parameters").getobj("input");
+        if (ad_input.has("width"))
+            _width = ad_input.get("width").get<int>();
+    }
+
     fill_dataset(_dataset, _txt);
     if (!_test_txt.empty())
         fill_dataset(_test_dataset, _test_txt);
@@ -155,7 +162,7 @@ void TxtTorchInputFileConn::fill_dataset(TorchDataset &dataset,
         at::Tensor mask_tensor = torch::ones_like(ids_tensor);
         at::Tensor token_type_ids_tensor = torch::zeros_like(ids_tensor);
 
-        int64_t padding_size = _in_size - ids_tensor.sizes().back();
+        int padding_size = _width - ids_tensor.sizes().back();
         ids_tensor = torch::constant_pad_nd(
             ids_tensor, at::IntList{0, padding_size}, 0);
         mask_tensor = torch::constant_pad_nd(
