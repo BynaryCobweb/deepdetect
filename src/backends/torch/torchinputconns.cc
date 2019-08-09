@@ -6,6 +6,7 @@ namespace dd {
 
 using namespace torch;
 
+// ===== TorchDataset
 
 void TorchDataset::add_batch(std::vector<at::Tensor> data, std::vector<at::Tensor> target)
 {
@@ -90,6 +91,8 @@ TorchDataset TorchDataset::split(double start, double stop)
 }
 
 
+// ===== TxtTorchInputFileConn
+
 void TxtTorchInputFileConn::transform(const APIData &ad) {
     try
     {
@@ -141,6 +144,9 @@ void TxtTorchInputFileConn::fill_dataset(TorchDataset &dataset,
 
         while(tow->has_elt())
         {
+            if (ids.size() >= _width - 1)
+                break;
+
             std::string word;
             double val;
             tow->get_next_elt(word, val);
@@ -162,6 +168,7 @@ void TxtTorchInputFileConn::fill_dataset(TorchDataset &dataset,
         at::Tensor mask_tensor = torch::ones_like(ids_tensor);
         at::Tensor token_type_ids_tensor = torch::zeros_like(ids_tensor);
 
+        // Pad to get constant size
         int padding_size = _width - ids_tensor.sizes().back();
         ids_tensor = torch::constant_pad_nd(
             ids_tensor, at::IntList{0, padding_size}, 0);

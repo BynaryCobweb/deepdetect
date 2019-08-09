@@ -288,6 +288,7 @@ namespace dd
                 std::vector<c10::IValue> in_vals;
                 for (Tensor tensor : example.data)
                     in_vals.push_back(tensor.to(_device));
+                if (example.data[0].max().item<int64_t>() > 30000) std::cout << example.data[0] << std::endl;
                 Tensor y_pred = to_tensor_safe(_module.forward(in_vals));
                 Tensor y = to_one_hot(example.target.at(0), _nclasses).to(_device);
 
@@ -308,12 +309,12 @@ namespace dd
                 ++batch_id;
             }
             
-            if (epoch > 0 && epoch % test_interval == 0 && !eval_dataset.empty())
+            int64_t elapsed_it = epoch + 1;
+            if (elapsed_it % test_interval == 0 && !eval_dataset.empty())
             {
                 APIData meas_out;
                 test(ad, eval_dataset, test_batch_size, meas_out);
-                eval_dataset = inputc._test_dataset; // XXX eval_dataset is moved. find a way to unmove it
-	            APIData meas_obj = meas_out.getobj("measure");
+                APIData meas_obj = meas_out.getobj("measure");
                 std::vector<std::string> meas_names = meas_obj.list_keys();
 
                 for (auto name : meas_names)
@@ -325,11 +326,10 @@ namespace dd
                 }
             }
 
-            int64_t check_id = epoch + 1;
-            if ((save_period != 0 && check_id % save_period == 0) || check_id == iterations)
+            if ((save_period != 0 && elapsed_it % save_period == 0) || elapsed_it == iterations)
             {
-                this->_logger->info("Saving checkpoint after {} iterations", check_id);
-                _module.save_checkpoint(this->_mlmodel, std::to_string(check_id));
+                this->_logger->info("Saving checkpoint after {} iterations", elapsed_it);
+                _module.save_checkpoint(this->_mlmodel, std::to_string(elapsed_it));
             }
         }
 
@@ -424,7 +424,7 @@ namespace dd
 
         // <!> std::move may lead to unexpected behaviour from the input connector
         auto dataloader = torch::data::make_data_loader(
-            std::move(dataset),
+            dataset,
             data::DataLoaderOptions(batch_size)
         );
 
@@ -452,7 +452,7 @@ namespace dd
                 ad_res.add(std::to_string(entry_id), bad);
                 ++entry_id;
             }
-            this->_logger->info("Testing: {}/{} entries processed", entry_id, test_size);
+            // this->_logger->info("Testing: {}/{} entries processed", entry_id, test_size);
         }
 
         ad_res.add("iteration",this->get_meas("iteration"));
