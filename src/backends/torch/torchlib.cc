@@ -319,10 +319,13 @@ namespace dd
 
                 for (auto name : meas_names)
                 {
-		            double mval = meas_obj.get(name).get<double>();
-                    this->_logger->info("{}={}", name, mval);
-                    this->add_meas(name, mval);
-                    this->add_meas_per_iter(name, mval);
+                    if (name != "cmdiag" && name != "cmfull" && name != "labels")
+                    {
+                        double mval = meas_obj.get(name).get<double>();
+                        this->_logger->info("{}={}", name, mval);
+                        this->add_meas(name, mval);
+                        this->add_meas_per_iter(name, mval);
+                    }
                 }
             }
 
