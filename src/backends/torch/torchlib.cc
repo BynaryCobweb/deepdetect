@@ -266,8 +266,24 @@ namespace dd
         }
 
         // create solver
-        // no care about solver type yet
-        optim::Adam optimizer(_module.parameters(), optim::AdamOptions(base_lr));
+        std::unique_ptr<optim::Optimizer> optimizer;
+        
+        if (solver_type == "ADAM")
+            optimizer = std::unique_ptr<optim::Optimizer>(
+                new optim::Adam(_module.parameters(), optim::AdamOptions(base_lr)));
+        else if (solver_type == "RMSPROP")
+            optimizer = std::unique_ptr<optim::Optimizer>(
+                new optim::RMSprop(_module.parameters(), optim::RMSpropOptions(base_lr)));
+        else if (solver_type == "ADAGRAD")
+            optimizer = std::unique_ptr<optim::Optimizer>(
+                new optim::Adagrad(_module.parameters(), optim::AdagradOptions(base_lr)));
+        else
+        {
+            if (solver_type != "SGD")
+                this->_logger->warn("Solver type {} not found, using SGD", solver_type);
+            optimizer = std::unique_ptr<optim::Optimizer>(
+                new optim::SGD(_module.parameters(), optim::SGDOptions(base_lr)));
+        }
 
         // create dataloader
         auto dataloader = torch::data::make_data_loader(
@@ -288,17 +304,15 @@ namespace dd
                 std::vector<c10::IValue> in_vals;
                 for (Tensor tensor : example.data)
                     in_vals.push_back(tensor.to(_device));
-                if (example.data[0].max().item<int64_t>() > 30000) std::cout << example.data[0] << std::endl;
                 Tensor y_pred = to_tensor_safe(_module.forward(in_vals));
                 Tensor y = to_one_hot(example.target.at(0), _nclasses).to(_device);
 
-                // TODO let loss be a parameter
                 auto loss = torch::mse_loss(y_pred, y);
                 double loss_val = loss.item<double>();
 
-                optimizer.zero_grad();
+                optimizer->zero_grad();
                 loss.backward();
-                optimizer.step();
+                optimizer->step();
 
                 this->add_meas("train_loss", loss_val);
                 this->add_meas_per_iter("train_loss", loss_val);
