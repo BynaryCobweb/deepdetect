@@ -184,6 +184,8 @@ namespace dd
             _template = lib_ad.get("template").get<std::string>();
         if (lib_ad.has("finetuning"))
             finetuning = lib_ad.get("finetuning").get<bool>();
+        if (lib_ad.has("self-supervised"))
+            _self_supervised = lib_ad.get("self-supervised").get<bool>();
 
         _device = gpu ? torch::Device("cuda") : torch::Device("cpu");
         _module._device = _device;
@@ -192,16 +194,23 @@ namespace dd
         if (this->_mlmodel._traced.empty())
             throw MLLibInternalException("This template requires a traced net");
 
-        if (_template == "bert-classification")
+        if (_self_supervised)
         {
-            if (!classification)
-                throw MLLibBadParamException("nclasses not specified");
-            
-            // XXX: dont hard code BERT output size
-            _module._classif = nn::Linear(768, _nclasses);
-            _module._classif->to(_device);
+            _module._classif_in = 0;
+        }
+        else
+        {
+            if (_template == "bert-classification")
+            {
+                if (!classification)
+                    throw MLLibBadParamException("nclasses not specified");
 
-            _module._classif_in = 1;
+                // XXX: dont hard code BERT output size
+                _module._classif = nn::Linear(768, _nclasses);
+                _module._classif->to(_device);
+
+                _module._classif_in = 1;
+            }
         }
 
         _module.load(this->_mlmodel);
@@ -290,22 +299,59 @@ namespace dd
             std::move(inputc._dataset),
             data::DataLoaderOptions(batch_size)
         );
-        this->_logger->info("Training for {} iterations", iterations);
 
+        std::mt19937 rng;
+        std::uniform_real_distribution<double> uniform(0, 1);
+        this->_logger->info("Training for {} iterations", iterations);
         for (int64_t epoch = 0; epoch < iterations; ++epoch)
         {
             _module.train();
             this->add_meas("iteration", epoch);
-            this->_logger->info("Iteration {}", epoch);
             int batch_id = 0;
 
             for (TorchBatch &example : *dataloader)
             {
                 std::vector<c10::IValue> in_vals;
-                for (Tensor tensor : example.data)
-                    in_vals.push_back(tensor.to(_device));
+                Tensor y;
+                if (_self_supervised)
+                {
+                    y = example.data.at(0);
+                    Tensor input_ids = example.data.at(0).clone();
+                    Tensor att_mask = example.data.at(2);
+
+                    // mask random tokens
+                    auto input_acc = input_ids.accessor<float,2>();
+                    auto att_mask_acc = input_ids.accessor<float,2>();
+                    for (int i = 0; i < input_ids.size(0); ++i)
+                    {
+                        int j = 1; // skip [CLS] token
+                        while (j < input_ids.size(1) && att_mask_acc[i][j] != 0)
+                        {
+                            double rand_num = uniform(rng);
+                            if (rand_num < _mask_prob)
+                            {
+                                input_acc[i][j] = inputc.mask_id();
+                            }
+                            else if (rand_num < _mask_prob + _permute_prob)
+                            {
+                                // TODO
+                            }
+                        }
+                    }
+                    in_vals.push_back(input_ids.to(_device));
+                    for (int i = 1; i < example.data.size(); ++i)
+                    {
+                        in_vals.push_back(example.data[i].to(_device));
+                    }
+                }
+                else
+                {
+                    for (Tensor tensor : example.data)
+                        in_vals.push_back(tensor.to(_device));
+                    y = to_one_hot(example.target.at(0), _nclasses).to(_device);
+                }
+
                 Tensor y_pred = to_tensor_safe(_module.forward(in_vals));
-                Tensor y = to_one_hot(example.target.at(0), _nclasses).to(_device);
 
                 auto loss = torch::mse_loss(y_pred, y);
                 double loss_val = loss.item<double>();

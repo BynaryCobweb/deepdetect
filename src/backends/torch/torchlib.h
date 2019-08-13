@@ -79,6 +79,9 @@ namespace dd
         int _nclasses = 0;
         std::string _template;
         torch::Device _device = torch::Device("cpu");
+        bool _self_supervised = false;
+        double _mask_prob = 0.15; /**< When masked LM learning, probability of masking a token. */
+        double _permute_prob = 0.05; /**< When masked LM learning, probability of permuting a token. */
 
         // models
         TorchModule _module;

@@ -84,6 +84,8 @@ namespace dd
             return torch::from_blob(&values[0], at::IntList{val_size}, at::kLong).clone();
         }
 
+        int64_t mask_id() { return 0; }
+
         TorchDataset _dataset;
         TorchDataset _test_dataset;
     };
@@ -173,6 +175,8 @@ namespace dd
             return _height;
         }
 
+        int64_t mask_id() { return _mask_id; }
+
         void transform(const APIData &ad);
 
         void fill_dataset(TorchDataset &dataset, const std::vector<TxtEntry<double>*> &entries);
@@ -180,6 +184,7 @@ namespace dd
         /** width of the input tensor */
         int _width = 512;
         int _height = 0;
+        int64_t _mask_id = -1; /**< ID of mask token in the vocabulary. */
     };
 } // namespace dd
 

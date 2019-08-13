@@ -124,6 +124,7 @@ void TxtTorchInputFileConn::fill_dataset(TorchDataset &dataset,
     int cls_pos = _vocab.at("[CLS]")._pos;
     int sep_pos = _vocab.at("[SEP]")._pos;
     int unk_pos = _vocab.at("[UNK]")._pos;
+    _mask_id = _vocab.at("[MASK]")._pos;
 
     for (auto *te : entries)
     {
