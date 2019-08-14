@@ -157,6 +157,7 @@ namespace dd
         _template = tl._template;
         _nclasses = tl._nclasses;
         _device = tl._device;
+        _self_supervised = true;
     }
 
     template <class TInputConnectorStrategy, class TOutputConnectorStrategy, class TMLModel>
@@ -184,8 +185,8 @@ namespace dd
             _template = lib_ad.get("template").get<std::string>();
         if (lib_ad.has("finetuning"))
             finetuning = lib_ad.get("finetuning").get<bool>();
-        if (lib_ad.has("self-supervised"))
-            _self_supervised = lib_ad.get("self-supervised").get<bool>();
+        if (lib_ad.has("self_supervised"))
+            _self_supervised = lib_ad.get("self_supervised").get<bool>();
 
         _device = gpu ? torch::Device("cuda") : torch::Device("cpu");
         _module._device = _device;
@@ -212,7 +213,9 @@ namespace dd
                 _module._classif_in = 1;
             }
         }
-
+        
+        this->_logger->info("Loading ml model from file {}.", this->_mlmodel._traced);
+        this->_logger->info("Loading weights from file {}.", this->_mlmodel._weights);
         _module.load(this->_mlmodel);
     }
 
@@ -315,13 +318,13 @@ namespace dd
                 Tensor y;
                 if (_self_supervised)
                 {
-                    y = example.data.at(0);
+                    y = example.data.at(0).to(_device);
                     Tensor input_ids = example.data.at(0).clone();
                     Tensor att_mask = example.data.at(2);
 
                     // mask random tokens
-                    auto input_acc = input_ids.accessor<float,2>();
-                    auto att_mask_acc = input_ids.accessor<float,2>();
+                    auto input_acc = input_ids.accessor<int64_t,2>();
+                    auto att_mask_acc = input_ids.accessor<int64_t,2>();
                     for (int i = 0; i < input_ids.size(0); ++i)
                     {
                         int j = 1; // skip [CLS] token
@@ -336,6 +339,7 @@ namespace dd
                             {
                                 // TODO
                             }
+                            ++j;
                         }
                     }
                     in_vals.push_back(input_ids.to(_device));
@@ -353,7 +357,19 @@ namespace dd
 
                 Tensor y_pred = to_tensor_safe(_module.forward(in_vals));
 
-                auto loss = torch::mse_loss(y_pred, y);
+                Tensor loss;
+                if (_self_supervised)
+                {
+                    loss = torch::nll_loss(
+                        torch::log_softmax(y_pred.view(IntList{-1, y_pred.size(2)}), 1),
+                        y.view(IntList{-1})
+                    );
+                }
+                else
+                {
+                    // TODO: Better choice for the loss
+                    loss = torch::mse_loss(y_pred, y);
+                }
                 double loss_val = loss.item<double>();
 
                 optimizer->zero_grad();
@@ -437,7 +453,7 @@ namespace dd
         for (Tensor tensor : inputc._dataset.get_cached().data)
             in_vals.push_back(tensor.to(_device));
         Tensor output = torch::softmax(to_tensor_safe(_module.forward(in_vals)), 1);
-        
+        std::cout << in_vals.at(0) << std::endl;
         // Output
         std::vector<APIData> results_ads;
 
@@ -485,7 +501,6 @@ namespace dd
         APIData ad_out = ad.getobj("parameters").getobj("output");
         int test_size = dataset.cache_size();
 
-        // <!> std::move may lead to unexpected behaviour from the input connector
         auto dataloader = torch::data::make_data_loader(
             dataset,
             data::DataLoaderOptions(batch_size)
@@ -515,7 +530,7 @@ namespace dd
                 ad_res.add(std::to_string(entry_id), bad);
                 ++entry_id;
             }
-            // this->_logger->info("Testing: {}/{} entries processed", entry_id, test_size);
+            this->_logger->info("Testing: {}/{} entries processed", entry_id, test_size);
         }
 
         ad_res.add("iteration",this->get_meas("iteration"));
