@@ -62,6 +62,7 @@ endif()
 if (USE_TORCH)
   list(APPEND ddetect_SOURCES
     backends/torch/torchlib.cc
+    backends/torch/torchnets.cc
     backends/torch/torchmodel.cc
     backends/torch/torchinputconns.cc
   )
