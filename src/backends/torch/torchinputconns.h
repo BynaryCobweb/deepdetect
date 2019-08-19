@@ -84,7 +84,8 @@ namespace dd
             return torch::from_blob(&values[0], at::IntList{val_size}, at::kLong).clone();
         }
 
-        int64_t mask_id() { return 0; }
+        int64_t mask_id() const { return 0; }
+        int64_t vocab_size() const { return 0; }
 
         TorchDataset _dataset;
         TorchDataset _test_dataset;
@@ -175,7 +176,9 @@ namespace dd
             return _height;
         }
 
-        int64_t mask_id() { return _mask_id; }
+        int64_t mask_id() const { return _mask_id; }
+
+        int64_t vocab_size() const { return _vocab.size(); }
 
         void transform(const APIData &ad);
 

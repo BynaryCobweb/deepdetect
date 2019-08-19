@@ -157,7 +157,7 @@ namespace dd
         _template = tl._template;
         _nclasses = tl._nclasses;
         _device = tl._device;
-        _self_supervised = true;
+        _masked_lm = _masked_lm;
     }
 
     template <class TInputConnectorStrategy, class TOutputConnectorStrategy, class TMLModel>
@@ -185,8 +185,8 @@ namespace dd
             _template = lib_ad.get("template").get<std::string>();
         if (lib_ad.has("finetuning"))
             finetuning = lib_ad.get("finetuning").get<bool>();
-        if (lib_ad.has("self_supervised"))
-            _self_supervised = lib_ad.get("self_supervised").get<bool>();
+        if (lib_ad.has("masked_lm"))
+            _masked_lm = lib_ad.get("masked_lm").get<bool>();
 
         _device = gpu ? torch::Device("cuda") : torch::Device("cpu");
         _module._device = _device;
@@ -195,7 +195,7 @@ namespace dd
         if (this->_mlmodel._traced.empty())
             throw MLLibInternalException("This template requires a traced net");
 
-        if (_self_supervised)
+        if (_masked_lm)
         {
             _module._classif_in = 0;
         }
@@ -305,6 +305,7 @@ namespace dd
 
         std::mt19937 rng;
         std::uniform_real_distribution<double> uniform(0, 1);
+        std::uniform_int_distribution<int64_t> vocab_distrib(0, inputc.vocab_size());
         this->_logger->info("Training for {} iterations", iterations);
         for (int64_t epoch = 0; epoch < iterations; ++epoch)
         {
@@ -316,7 +317,7 @@ namespace dd
             {
                 std::vector<c10::IValue> in_vals;
                 Tensor y;
-                if (_self_supervised)
+                if (_masked_lm)
                 {
                     y = example.data.at(0).to(_device);
                     Tensor input_ids = example.data.at(0).clone();
@@ -331,13 +332,17 @@ namespace dd
                         while (j < input_ids.size(1) && att_mask_acc[i][j] != 0)
                         {
                             double rand_num = uniform(rng);
-                            if (rand_num < _mask_prob)
+                            if (rand_num < _change_prob)
                             {
-                                input_acc[i][j] = inputc.mask_id();
-                            }
-                            else if (rand_num < _mask_prob + _permute_prob)
-                            {
-                                // TODO
+                                rand_num = uniform(rng);
+                                if (rand_num < _mask_prob)
+                                {
+                                    input_acc[i][j] = inputc.mask_id();
+                                }
+                                else if (rand_num < _mask_prob + _rand_prob)
+                                {
+                                    input_acc[i][j] = vocab_distrib(rng);
+                                }
                             }
                             ++j;
                         }
@@ -358,7 +363,7 @@ namespace dd
                 Tensor y_pred = to_tensor_safe(_module.forward(in_vals));
 
                 Tensor loss;
-                if (_self_supervised)
+                if (_masked_lm)
                 {
                     loss = torch::nll_loss(
                         torch::log_softmax(y_pred.view(IntList{-1, y_pred.size(2)}), 1),
