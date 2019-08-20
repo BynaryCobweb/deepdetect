@@ -247,6 +247,7 @@ namespace dd
         std::string solver_type = "SGD";
         double base_lr = 0.0001;
         int64_t batch_size = 5;
+        int64_t iter_size = 1;
         int64_t test_batch_size = 1;
         int64_t test_interval = 1;
         int64_t save_period = 0;
@@ -265,10 +266,15 @@ namespace dd
             test_interval = ad_mllib.get("test_interval").get<int>();
         if (ad_mllib.has("batch_size"))
             batch_size = ad_mllib.get("batch_size").get<int>();
+        if (ad_mllib.has("iter_size"))
+            iter_size = ad_mllib.get("iter_size").get<int>();
         if (ad_mllib.has("test_batch_size"))
             test_batch_size = ad_mllib.get("test_batch_size").get<int>();
         if (ad_mllib.has("save_period"))
             save_period = ad_mllib.get("save_period").get<int>();
+
+        if (iter_size <= 0)
+            iter_size = 1;
 
         // create dataset for evaluation during training
         TorchDataset eval_dataset;
@@ -376,10 +382,13 @@ namespace dd
                     loss = torch::mse_loss(y_pred, y);
                 }
                 double loss_val = loss.item<double>();
-
-                optimizer->zero_grad();
                 loss.backward();
-                optimizer->step();
+
+                if ((batch_id + 1) % iter_size == 0 || batch_id + 1 == batch_count)
+                {
+                    optimizer->step();
+                    optimizer->zero_grad();
+                }
 
                 this->add_meas("train_loss", loss_val);
                 this->add_meas_per_iter("train_loss", loss_val);
