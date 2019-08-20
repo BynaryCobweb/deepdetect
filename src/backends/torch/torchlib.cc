@@ -157,7 +157,7 @@ namespace dd
         _template = tl._template;
         _nclasses = tl._nclasses;
         _device = tl._device;
-        _masked_lm = _masked_lm;
+        _masked_lm = tl._masked_lm;
     }
 
     template <class TInputConnectorStrategy, class TOutputConnectorStrategy, class TMLModel>
@@ -234,6 +234,8 @@ namespace dd
         try
         {
             inputc.transform(ad);
+            _vocab_size = inputc.vocab_size();
+            _mask_token = inputc.mask_id();
         }
         catch (...)
         {
@@ -251,7 +253,6 @@ namespace dd
         int64_t test_batch_size = 1;
         int64_t test_interval = 1;
         int64_t save_period = 0;
-        int64_t batch_count = (inputc._dataset.cache_size() - 1) / batch_size + 1;
 
         // logging parameters
         int64_t log_batch_period = 20;
@@ -273,6 +274,7 @@ namespace dd
         if (ad_mllib.has("save_period"))
             save_period = ad_mllib.get("save_period").get<int>();
 
+        int64_t batch_count = (inputc._dataset.cache_size() - 1) / batch_size + 1;
         if (iter_size <= 0)
             iter_size = 1;
 
@@ -309,14 +311,12 @@ namespace dd
             data::DataLoaderOptions(batch_size)
         );
 
-        std::mt19937 rng;
-        std::uniform_real_distribution<double> uniform(0, 1);
-        std::uniform_int_distribution<int64_t> vocab_distrib(0, inputc.vocab_size());
         this->_logger->info("Training for {} iterations", iterations);
         for (int64_t epoch = 0; epoch < iterations; ++epoch)
         {
             _module.train();
             this->add_meas("iteration", epoch);
+            double train_loss = 0;
             int batch_id = 0;
 
             for (TorchBatch &example : *dataloader)
@@ -325,39 +325,7 @@ namespace dd
                 Tensor y;
                 if (_masked_lm)
                 {
-                    y = example.data.at(0).to(_device);
-                    Tensor input_ids = example.data.at(0).clone();
-                    Tensor att_mask = example.data.at(2);
-
-                    // mask random tokens
-                    auto input_acc = input_ids.accessor<int64_t,2>();
-                    auto att_mask_acc = input_ids.accessor<int64_t,2>();
-                    for (int i = 0; i < input_ids.size(0); ++i)
-                    {
-                        int j = 1; // skip [CLS] token
-                        while (j < input_ids.size(1) && att_mask_acc[i][j] != 0)
-                        {
-                            double rand_num = uniform(rng);
-                            if (rand_num < _change_prob)
-                            {
-                                rand_num = uniform(rng);
-                                if (rand_num < _mask_prob)
-                                {
-                                    input_acc[i][j] = inputc.mask_id();
-                                }
-                                else if (rand_num < _mask_prob + _rand_prob)
-                                {
-                                    input_acc[i][j] = vocab_distrib(rng);
-                                }
-                            }
-                            ++j;
-                        }
-                    }
-                    in_vals.push_back(input_ids.to(_device));
-                    for (int i = 1; i < example.data.size(); ++i)
-                    {
-                        in_vals.push_back(example.data[i].to(_device));
-                    }
+                    generate_masked_lm_batch(y, in_vals, example);
                 }
                 else
                 {
@@ -367,7 +335,6 @@ namespace dd
                 }
 
                 Tensor y_pred = to_tensor_safe(_module.forward(in_vals));
-
                 Tensor loss;
                 if (_masked_lm)
                 {
@@ -390,15 +357,17 @@ namespace dd
                     optimizer->zero_grad();
                 }
 
-                this->add_meas("train_loss", loss_val);
-                this->add_meas_per_iter("train_loss", loss_val);
+                train_loss += loss_val;
                 if (log_batch_period != 0 && (batch_id + 1) % log_batch_period == 0)
                 {
                     this->_logger->info("Batch {}/{}: loss is {}", batch_id + 1, batch_count, loss_val);
                 }
                 ++batch_id;
             }
-            
+
+            this->add_meas("train_loss", train_loss);
+            this->add_meas_per_iter("train_loss", train_loss);
+
             int64_t elapsed_it = epoch + 1;
             if (elapsed_it % test_interval == 0 && !eval_dataset.empty())
             {
@@ -409,7 +378,7 @@ namespace dd
 
                 for (auto name : meas_names)
                 {
-                    if (name != "cmdiag" && name != "cmfull" && name != "labels")
+                    if (name != "cmdiag" && name != "cmfull" && name != "labels" && name != "train_loss")
                     {
                         double mval = meas_obj.get(name).get<double>();
                         this->_logger->info("{}={}", name, mval);
@@ -447,6 +416,8 @@ namespace dd
         TOutputConnectorStrategy outputc;
         try {
             inputc.transform(ad);
+            _vocab_size = inputc.vocab_size();
+            _mask_token = inputc.mask_id();
         } catch (...) {
             throw;
         }
@@ -525,12 +496,21 @@ namespace dd
         for (TorchBatch &batch : *dataloader)
         {
             std::vector<c10::IValue> in_vals;
-            for (Tensor tensor : batch.data)
-                in_vals.push_back(tensor.to(_device));
+            Tensor labels;
+            if (_masked_lm)
+            {
+                generate_masked_lm_batch(labels, in_vals, batch);
+            }
+            else
+            {
+                if (batch.target.empty())
+                    throw MLLibBadParamException("Missing label on data while testing");
+                labels = batch.target[0];
+                for (Tensor tensor : batch.data)
+                    in_vals.push_back(tensor.to(_device));
+            }
+            
             Tensor output = torch::softmax(to_tensor_safe(_module.forward(in_vals)), 1);
-            if (batch.target.empty())
-                throw MLLibBadParamException("Missing label on data while testing");
-            Tensor labels = batch.target[0];
             
             for (int j = 0; j < labels.size(0); ++j) {
                 APIData bad;
@@ -557,6 +537,48 @@ namespace dd
         ad_res.add("batch_size", entry_id); // here batch_size = tested entries count
         SupervisedOutput::measure(ad_res, ad_out, out);
         return 0;
+    }
+
+    template <class TInputConnectorStrategy, class TOutputConnectorStrategy, class TMLModel>
+    void TorchLib<TInputConnectorStrategy, TOutputConnectorStrategy, TMLModel>::generate_masked_lm_batch(
+        Tensor &target,
+        std::vector<c10::IValue> &in_vals,
+        const TorchBatch &example)
+    {
+        std::uniform_real_distribution<double> uniform(0, 1);
+        std::uniform_int_distribution<int64_t> vocab_distrib(0, _vocab_size);
+        target = example.data.at(0).to(_device);
+        Tensor input_ids = example.data.at(0).clone();
+
+        // mask random tokens
+        auto input_acc = input_ids.accessor<int64_t,2>();
+        auto att_mask_acc = example.data.at(2).accessor<int64_t,2>();
+        for (int i = 0; i < input_ids.size(0); ++i)
+        {
+            int j = 1; // skip [CLS] token
+            while (j < input_ids.size(1) && att_mask_acc[i][j] != 0)
+            {
+                double rand_num = uniform(_rng);
+                if (rand_num < _change_prob)
+                {
+                    rand_num = uniform(_rng);
+                    if (rand_num < _mask_prob)
+                    {
+                        input_acc[i][j] = _mask_token;
+                    }
+                    else if (rand_num < _mask_prob + _rand_prob)
+                    {
+                        input_acc[i][j] = vocab_distrib(_rng);
+                    }
+                }
+                ++j;
+            }
+        }
+        in_vals.push_back(input_ids.to(_device));
+        for (int i = 1; i < example.data.size(); ++i)
+        {
+            in_vals.push_back(example.data[i].to(_device));
+        }
     }
 
     template class TorchLib<ImgTorchInputFileConn,SupervisedOutput,TorchModel>;

@@ -22,6 +22,8 @@
 #ifndef TORCHLIB_H
 #define TORCHLIB_H
 
+#include <random>
+
 #include <torch/torch.h>
 
 #include "apidata.h"
@@ -51,7 +53,7 @@ namespace dd
         torch::nn::Linear _classif = nullptr;
 
         torch::Device _device;
-        int _classif_in = 0;/**<id of the input of the classification layer */
+        int _classif_in = 0; /**<id of the input of the classification layer */
     };
 
 
@@ -78,6 +80,7 @@ namespace dd
     public:
         int _nclasses = 0;
         std::string _template;
+        std::mt19937 _rng;
         torch::Device _device = torch::Device("cpu");
         bool _masked_lm = false;
         double _change_prob = 0.15; /**< When masked LM learning, probability of changing a token (mask/randomize/keep). */
@@ -86,6 +89,15 @@ namespace dd
 
         // models
         TorchModule _module;
+
+        // XXX: Avoid using this variables
+        int _vocab_size = 0;
+        int _mask_token = 0;
+
+        void generate_masked_lm_batch(
+            at::Tensor &target,
+            std::vector<c10::IValue> &in_vals,
+            const TorchBatch &example);
     };
 }
 
