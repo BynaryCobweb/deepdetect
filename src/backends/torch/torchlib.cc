@@ -277,6 +277,7 @@ namespace dd
         int64_t batch_count = (inputc._dataset.cache_size() - 1) / batch_size + 1;
         if (iter_size <= 0)
             iter_size = 1;
+        int64_t step_count = (batch_count - 1) / iter_size + 1;
 
         // create dataset for evaluation during training
         TorchDataset eval_dataset;
@@ -304,6 +305,7 @@ namespace dd
             optimizer = std::unique_ptr<optim::Optimizer>(
                 new optim::SGD(_module.parameters(), optim::SGDOptions(base_lr)));
         }
+        optimizer->zero_grad();
 
         // create dataloader
         auto dataloader = torch::data::make_data_loader(
@@ -318,6 +320,7 @@ namespace dd
             this->add_meas("iteration", epoch);
             double train_loss = 0;
             int batch_id = 0;
+            int step_id = 0;
 
             for (TorchBatch &example : *dataloader)
             {
@@ -342,31 +345,43 @@ namespace dd
                         torch::log_softmax(y_pred.view(IntList{-1, y_pred.size(2)}), 1),
                         y.view(IntList{-1})
                     );
+                    /*
+                    Tensor a = torch::log_softmax(y_pred.view(IntList{-1, y_pred.size(2)}), 1);
+                    Tensor b = y.view(IntList{-1});
+
+                    std::cout << y_pred[0][0].sizes() << std::endl;
+                    std::cout << torch::sum(torch::log_softmax(y_pred[2][2], 0) - a[512 * 2 + 2]) << std::endl;
+                    std::cout << b[0] << std::endl;
+                    */
                 }
                 else
                 {
                     // TODO: Better choice for the loss
                     loss = torch::mse_loss(y_pred, y);
                 }
+                if (iter_size > 1)
+                    loss /= iter_size;
                 double loss_val = loss.item<double>();
+                train_loss += loss_val;
                 loss.backward();
 
                 if ((batch_id + 1) % iter_size == 0 || batch_id + 1 == batch_count)
                 {
                     optimizer->step();
                     optimizer->zero_grad();
+                    this->add_meas("train_loss", train_loss);
+                    this->add_meas_per_iter("train_loss", train_loss);
+                    train_loss = 0;
+
+                    if (log_batch_period != 0 && (step_id + 1) % log_batch_period == 0)
+                    {
+                        this->_logger->info("Batch {}/{}: loss is {}", step_id + 1, step_count, loss_val);
+                    }
+                    ++step_id;
                 }
 
-                train_loss += loss_val;
-                if (log_batch_period != 0 && (batch_id + 1) % log_batch_period == 0)
-                {
-                    this->_logger->info("Batch {}/{}: loss is {}", batch_id + 1, batch_count, loss_val);
-                }
                 ++batch_id;
             }
-
-            this->add_meas("train_loss", train_loss);
-            this->add_meas_per_iter("train_loss", train_loss);
 
             int64_t elapsed_it = epoch + 1;
             if (elapsed_it % test_interval == 0 && !eval_dataset.empty())
@@ -438,7 +453,6 @@ namespace dd
         for (Tensor tensor : inputc._dataset.get_cached().data)
             in_vals.push_back(tensor.to(_device));
         Tensor output = torch::softmax(to_tensor_safe(_module.forward(in_vals)), 1);
-        std::cout << in_vals.at(0) << std::endl;
         // Output
         std::vector<APIData> results_ads;
 
