@@ -274,10 +274,8 @@ namespace dd
         if (ad_mllib.has("save_period"))
             save_period = ad_mllib.get("save_period").get<int>();
 
-        int64_t batch_count = (inputc._dataset.cache_size() - 1) / batch_size + 1;
         if (iter_size <= 0)
             iter_size = 1;
-        int64_t step_count = (batch_count - 1) / iter_size + 1;
 
         // create dataset for evaluation during training
         TorchDataset eval_dataset;
@@ -306,6 +304,7 @@ namespace dd
                 new optim::SGD(_module.parameters(), optim::SGDOptions(base_lr)));
         }
         optimizer->zero_grad();
+        _module.train();
 
         // create dataloader
         auto dataloader = torch::data::make_data_loader(
@@ -314,13 +313,12 @@ namespace dd
         );
 
         this->_logger->info("Training for {} iterations", iterations);
-        for (int64_t epoch = 0; epoch < iterations; ++epoch)
+        int it = 0;
+        int batch_id = 0;
+        
+        while (it < iterations)
         {
-            _module.train();
-            this->add_meas("iteration", epoch);
             double train_loss = 0;
-            int batch_id = 0;
-            int step_id = 0;
 
             for (TorchBatch &example : *dataloader)
             {
@@ -345,14 +343,6 @@ namespace dd
                         torch::log_softmax(y_pred.view(IntList{-1, y_pred.size(2)}), 1),
                         y.view(IntList{-1})
                     );
-                    /*
-                    Tensor a = torch::log_softmax(y_pred.view(IntList{-1, y_pred.size(2)}), 1);
-                    Tensor b = y.view(IntList{-1});
-
-                    std::cout << y_pred[0][0].sizes() << std::endl;
-                    std::cout << torch::sum(torch::log_softmax(y_pred[2][2], 0) - a[512 * 2 + 2]) << std::endl;
-                    std::cout << b[0] << std::endl;
-                    */
                 }
                 else
                 {
@@ -365,48 +355,52 @@ namespace dd
                 train_loss += loss_val;
                 loss.backward();
 
-                if ((batch_id + 1) % iter_size == 0 || batch_id + 1 == batch_count)
+                if ((batch_id + 1) % iter_size == 0)
                 {
                     optimizer->step();
                     optimizer->zero_grad();
+                    this->add_meas("iteration", it);
                     this->add_meas("train_loss", train_loss);
                     this->add_meas_per_iter("train_loss", train_loss);
                     train_loss = 0;
 
-                    if (log_batch_period != 0 && (step_id + 1) % log_batch_period == 0)
+                    int64_t elapsed_it = it + 1;
+                    if (elapsed_it % test_interval == 0 && !eval_dataset.empty())
                     {
-                        this->_logger->info("Batch {}/{}: loss is {}", step_id + 1, step_count, loss_val);
+                        APIData meas_out;
+                        test(ad, eval_dataset, test_batch_size, meas_out);
+                        APIData meas_obj = meas_out.getobj("measure");
+                        std::vector<std::string> meas_names = meas_obj.list_keys();
+
+                        for (auto name : meas_names)
+                        {
+                            if (name != "cmdiag" && name != "cmfull" && name != "labels")
+                            {
+                                double mval = meas_obj.get(name).get<double>();
+                                this->_logger->info("{}={}", name, mval);
+                                this->add_meas(name, mval);
+                                this->add_meas_per_iter(name, mval);
+                            }
+                        }
                     }
-                    ++step_id;
+
+                    if (log_batch_period != 0 && elapsed_it % log_batch_period == 0)
+                    {
+                        this->_logger->info("Iteration {}/{}: loss is {}", elapsed_it, iterations, loss_val);
+                    }
+
+                    if ((save_period != 0 && elapsed_it % save_period == 0) || elapsed_it == iterations)
+                    {
+                        this->_logger->info("Saving checkpoint after {} iterations", elapsed_it);
+                        _module.save_checkpoint(this->_mlmodel, std::to_string(elapsed_it));
+                    }
+                    ++it;
+                    
+                    if (it >= iterations)
+                        break;
                 }
 
                 ++batch_id;
-            }
-
-            int64_t elapsed_it = epoch + 1;
-            if (elapsed_it % test_interval == 0 && !eval_dataset.empty())
-            {
-                APIData meas_out;
-                test(ad, eval_dataset, test_batch_size, meas_out);
-                APIData meas_obj = meas_out.getobj("measure");
-                std::vector<std::string> meas_names = meas_obj.list_keys();
-
-                for (auto name : meas_names)
-                {
-                    if (name != "cmdiag" && name != "cmfull" && name != "labels" && name != "train_loss")
-                    {
-                        double mval = meas_obj.get(name).get<double>();
-                        this->_logger->info("{}={}", name, mval);
-                        this->add_meas(name, mval);
-                        this->add_meas_per_iter(name, mval);
-                    }
-                }
-            }
-
-            if ((save_period != 0 && elapsed_it % save_period == 0) || elapsed_it == iterations)
-            {
-                this->_logger->info("Saving checkpoint after {} iterations", elapsed_it);
-                _module.save_checkpoint(this->_mlmodel, std::to_string(elapsed_it));
             }
         }
 
