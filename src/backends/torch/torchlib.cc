@@ -222,7 +222,8 @@ namespace dd
     template <class TInputConnectorStrategy, class TOutputConnectorStrategy, class TMLModel>
     void TorchLib<TInputConnectorStrategy, TOutputConnectorStrategy, TMLModel>::clear_mllib(const APIData &ad) 
     {
-
+        std::vector<std::string> extensions{".json"};
+        fileops::remove_directory_files(this->_mlmodel._repo, extensions);
     }
 
     template <class TInputConnectorStrategy, class TOutputConnectorStrategy, class TMLModel>
