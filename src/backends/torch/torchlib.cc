@@ -315,13 +315,16 @@ namespace dd
         this->_logger->info("Training for {} iterations", iterations);
         int it = 0;
         int batch_id = 0;
-        
+        using namespace std::chrono;
+
         while (it < iterations)
         {
             double train_loss = 0;
+            double avg_it_time = 0;
 
             for (TorchBatch &example : *dataloader)
             {
+                auto tstart = system_clock::now();
                 std::vector<c10::IValue> in_vals;
                 Tensor y;
                 if (_masked_lm)
@@ -354,12 +357,17 @@ namespace dd
                 double loss_val = loss.item<double>();
                 train_loss += loss_val;
                 loss.backward();
+                auto tstop = system_clock::now();
+                avg_it_time += duration_cast<milliseconds>(tstop - tstart).count();
 
                 if ((batch_id + 1) % iter_size == 0)
                 {
                     optimizer->step();
                     optimizer->zero_grad();
+                    avg_it_time /= iter_size;
                     this->add_meas("iteration", it);
+                    this->add_meas("iter_time", avg_it_time);
+                    this->add_meas("remain_time", avg_it_time * iter_size * (iterations - it) / 1000.0);
                     this->add_meas("train_loss", train_loss);
                     this->add_meas_per_iter("train_loss", train_loss);
                     train_loss = 0;
