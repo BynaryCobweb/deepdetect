@@ -113,35 +113,66 @@ void TxtTorchInputFileConn::transform(const APIData &ad) {
             _width = ad_input.get("width").get<int>();
     }
 
+    _cls_pos = _vocab.at("[CLS]")._pos;
+    _sep_pos = _vocab.at("[SEP]")._pos;
+    _unk_pos = _vocab.at("[UNK]")._pos;
+    _mask_id = _vocab.at("[MASK]")._pos;
+
     fill_dataset(_dataset, _txt);
     if (!_test_txt.empty())
         fill_dataset(_test_dataset, _test_txt);
 }
 
+TorchBatch TxtTorchInputFileConn::generate_masked_lm_batch(const TorchBatch &example) 
+{
+    std::uniform_real_distribution<double> uniform(0, 1);
+    std::uniform_int_distribution<int64_t> vocab_distrib(0, vocab_size());
+    Tensor input_ids = example.data.at(0).clone();
+
+    // mask random tokens
+    auto input_acc = input_ids.accessor<int64_t,2>();
+    auto att_mask_acc = example.data.at(2).accessor<int64_t,2>();
+    for (int i = 0; i < input_ids.size(0); ++i)
+    {
+        int j = 1; // skip [CLS] token
+        while (j < input_ids.size(1) && att_mask_acc[i][j] != 0)
+        {
+            double rand_num = uniform(_rng);
+            if (rand_num < _lm_params._change_prob)
+            {
+                rand_num = uniform(_rng);
+                if (rand_num < _lm_params._mask_prob)
+                {
+                    input_acc[i][j] = mask_id();
+                }
+                else if (rand_num < _lm_params._mask_prob + _lm_params._rand_prob)
+                {
+                    input_acc[i][j] = vocab_distrib(_rng);
+                }
+            }
+            ++j;
+        }
+    }
+
+    TorchBatch output;
+    output.target.push_back(example.data.at(0));
+    output.data.push_back(input_ids);
+    for (int i = 1; i < example.data.size(); ++i)
+    {
+        output.data.push_back(example.data[i]);
+    }
+    return output;
+}
+
 void TxtTorchInputFileConn::fill_dataset(TorchDataset &dataset, 
                                          const std::vector<TxtEntry<double>*> &entries)
 {
-    int cls_pos = _vocab.at("[CLS]")._pos;
-    int sep_pos = _vocab.at("[SEP]")._pos;
-    int unk_pos = _vocab.at("[UNK]")._pos;
-    _mask_id = _vocab.at("[MASK]")._pos;
-
     for (auto *te : entries)
     {
         TxtOrderedWordsEntry *tow = static_cast<TxtOrderedWordsEntry *>(te);
         tow->reset();
-
         std::vector<int64_t> ids;
-        /* // Exemple in:
-        {
-            101, 2489, 4443, 1999, 1016, 1037, 1059, 2243, 2135, 4012, 2361,
-            2000, 2663, 6904, 2452, 2345, 1056, 25509, 2015, 7398, 2089, 2384,
-            1012, 3793, 6904, 2000, 6584, 12521, 2487, 2000, 4374, 4443, 3160,
-            1006, 2358, 2094, 19067, 2102, 3446, 1007, 1056, 1004, 1039, 1005,
-            1055, 6611, 5511, 19961, 22407, 18613, 23352, 7840, 15136, 1005, 1055, 102
-        }; */
-
-        ids.push_back(cls_pos);
+        ids.push_back(_cls_pos);
 
         while(tow->has_elt())
         {
@@ -159,11 +190,11 @@ void TxtTorchInputFileConn::fill_dataset(TorchDataset &dataset,
             }
             else
             {
-                ids.push_back(unk_pos);
+                ids.push_back(_unk_pos);
             }
         }
 
-        ids.push_back(sep_pos);
+        ids.push_back(_sep_pos);
 
         at::Tensor ids_tensor = toLongTensor(ids);
         at::Tensor mask_tensor = torch::ones_like(ids_tensor);

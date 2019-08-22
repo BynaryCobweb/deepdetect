@@ -74,30 +74,18 @@ namespace dd
 
         int predict(const APIData &ad, APIData &out);
 
-        int test(const APIData &ad, TorchDataset &dataset, 
+        int test(const APIData &ad, TInputConnectorStrategy &inputc,
+                 TorchDataset &dataset,
                  int batch_size, APIData &out);
 
     public:
         int _nclasses = 0;
         std::string _template;
-        std::mt19937 _rng;
         torch::Device _device = torch::Device("cpu");
         bool _masked_lm = false;
-        double _change_prob = 0.15; /**< When masked LM learning, probability of changing a token (mask/randomize/keep). */
-        double _mask_prob =  0.8; /**< When masked LM learning, probability of masking a token. */
-        double _rand_prob = 0.1; /**< When masked LM learning, probability of randomizing a token. */
 
         // models
         TorchModule _module;
-
-        // XXX: Avoid using this variables
-        int _vocab_size = 0;
-        int _mask_token = 0;
-
-        void generate_masked_lm_batch(
-            at::Tensor &target,
-            std::vector<c10::IValue> &in_vals,
-            const TorchBatch &example);
     };
 }
 
