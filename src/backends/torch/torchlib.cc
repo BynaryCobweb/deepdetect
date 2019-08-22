@@ -111,9 +111,9 @@ namespace dd
     void TorchModule::save_checkpoint(TorchModel &model, const std::string &name) 
     {
         if (_traced)
-            _traced->save(model._repo + "/checkpoint-" + name + "-trace.pt");
+            _traced->save(model._repo + "/checkpoint-" + name + ".pt");
         if (_classif)
-            torch::save(_classif, model._repo + "/checkpoint-" + name + ".pt");
+            torch::save(_classif, model._repo + "/checkpoint-" + name + ".ptw");
     }
 
     void TorchModule::load(TorchModel &model) 
@@ -235,7 +235,7 @@ namespace dd
         try
         {
             inputc.transform(ad);
-            _vocab_size = inputc.vocab_size();
+            _nclasses = _vocab_size = inputc.vocab_size();
             _mask_token = inputc.mask_id();
         }
         catch (...)
@@ -355,6 +355,7 @@ namespace dd
                 }
                 if (iter_size > 1)
                     loss /= iter_size;
+
                 double loss_val = loss.item<double>();
                 train_loss += loss_val;
                 loss.backward();
@@ -434,7 +435,7 @@ namespace dd
         TOutputConnectorStrategy outputc;
         try {
             inputc.transform(ad);
-            _vocab_size = inputc.vocab_size();
+            _nclasses = _vocab_size = inputc.vocab_size();
             _mask_token = inputc.mask_id();
         } catch (...) {
             throw;
@@ -526,9 +527,15 @@ namespace dd
                 for (Tensor tensor : batch.data)
                     in_vals.push_back(tensor.to(_device));
             }
-            
-            Tensor output = torch::softmax(to_tensor_safe(_module.forward(in_vals)), 1);
-            
+
+            Tensor output = to_tensor_safe(_module.forward(in_vals));
+            if (_masked_lm)
+            {
+                output = output.view(IntList{-1, output.size(2)});
+                labels = labels.view(IntList{-1});
+            }
+            output = torch::softmax(output, 1);
+
             for (int j = 0; j < labels.size(0); ++j) {
                 APIData bad;
                 std::vector<double> predictions;
@@ -546,13 +553,26 @@ namespace dd
 
         ad_res.add("iteration",this->get_meas("iteration"));
         ad_res.add("train_loss",this->get_meas("train_loss"));
-        std::vector<std::string> clnames;
-        for (int i=0;i<_nclasses;i++)
-            clnames.push_back(this->_mlmodel.get_hcorresp(i));
-        ad_res.add("clnames", clnames);
-        ad_res.add("nclasses", _nclasses);
+        if (_masked_lm)
+        {
+            std::vector<std::string> clnames;
+            for (int i=0;i<_vocab_size;++i)
+                clnames.push_back(std::to_string(i));
+            ad_res.add("clnames", clnames);
+            ad_res.add("nclasses", _vocab_size);
+        }
+        else
+        {
+            std::vector<std::string> clnames;
+            for (int i=0;i<_nclasses;i++)
+                clnames.push_back(this->_mlmodel.get_hcorresp(i));
+            ad_res.add("clnames", clnames);
+            ad_res.add("nclasses", _nclasses);
+        }
         ad_res.add("batch_size", entry_id); // here batch_size = tested entries count
+        std::cout << "avant" << std::endl;
         SupervisedOutput::measure(ad_res, ad_out, out);
+        std::cout << "apres" << std::endl;
         return 0;
     }
 
