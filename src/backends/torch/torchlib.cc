@@ -511,29 +511,48 @@ namespace dd
 
         _module.eval();
         int entry_id = 0;
-        for (TorchBatch &batch : *dataloader)
+        for (TorchBatch &example : *dataloader)
         {
-            std::vector<c10::IValue> in_vals;
-            Tensor labels;
+            TorchBatch batch;
             if (_masked_lm)
             {
-                batch = inputc.generate_masked_lm_batch(batch);
+                batch = inputc.generate_masked_lm_batch(example);
             }
-            if (batch.target.empty())
-                throw MLLibBadParamException("Missing label on data while testing");
-            labels = batch.target[0];
+            else
+            {
+                batch = example;
+            }
+            std::vector<c10::IValue> in_vals;
             for (Tensor tensor : batch.data)
                 in_vals.push_back(tensor.to(_device));
-
+            
+            /// XXX: try catch
             Tensor output = to_tensor_safe(_module.forward(in_vals));
+
+            if (batch.target.empty())
+                throw MLLibBadParamException("Missing label on data while testing");
+            Tensor labels = batch.target[0];
+            Tensor loss_weights;
             if (_masked_lm)
             {
                 output = output.view(IntList{-1, output.size(2)});
                 labels = labels.view(IntList{-1});
+                loss_weights = batch.target.at(1).view(IntList{-1});
+            }
+            else
+            {
+                loss_weights = torch::ones_like(labels);
             }
             output = torch::softmax(output, 1);
+            auto output_acc = output.accessor<double,2>();
+            auto labels_acc = labels.accessor<double,1>();
+            auto loss_weights_acc = loss_weights.accessor<double,1>();
 
-            for (int j = 0; j < labels.size(0); ++j) {
+            for (int j = 0; j < labels.size(0); ++j)
+            {
+                if (_masked_lm && loss_weights_acc[j] == 0)
+                    continue;
+
                 APIData bad;
                 std::vector<double> predictions;
                 for (int c = 0; c < nclasses; c++)
