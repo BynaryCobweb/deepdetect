@@ -508,6 +508,7 @@ namespace dd
             dataset,
             data::DataLoaderOptions(batch_size)
         );
+        torch::Device cpu("cpu");
 
         _module.eval();
         int entry_id = 0;
@@ -541,25 +542,25 @@ namespace dd
             }
             else
             {
-                loss_weights = torch::ones_like(labels);
+                loss_weights = torch::ones_like(labels, TensorOptions(kFloat));
             }
-            output = torch::softmax(output, 1);
-            auto output_acc = output.accessor<double,2>();
-            auto labels_acc = labels.accessor<double,1>();
-            auto loss_weights_acc = loss_weights.accessor<double,1>();
+            output = torch::softmax(output, 1).to(cpu);
+            auto output_acc = output.accessor<float,2>();
+            auto labels_acc = labels.accessor<int64_t,1>();
+            auto loss_weights_acc = loss_weights.accessor<float,1>();
 
             for (int j = 0; j < labels.size(0); ++j)
             {
-                if (_masked_lm && loss_weights_acc[j] == 0)
+                if (_masked_lm && loss_weights_acc[j] <= std::numeric_limits<float>::epsilon())
                     continue;
 
                 APIData bad;
                 std::vector<double> predictions;
                 for (int c = 0; c < nclasses; c++)
                 {
-                    predictions.push_back(output[j][c].item<double>());
+                    predictions.push_back(output_acc[j][c]);
                 }
-                bad.add("target", labels[j].item<double>());
+                bad.add("target", static_cast<double>(labels_acc[j]));
                 bad.add("pred", predictions);
                 ad_res.add(std::to_string(entry_id), bad);
                 ++entry_id;

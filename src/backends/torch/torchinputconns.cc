@@ -128,12 +128,12 @@ TorchBatch TxtTorchInputFileConn::generate_masked_lm_batch(const TorchBatch &exa
     std::uniform_real_distribution<double> uniform(0, 1);
     std::uniform_int_distribution<int64_t> vocab_distrib(0, vocab_size());
     Tensor input_ids = example.data.at(0).clone();
-    Tensor loss_weights = torch::zeros_like(input_ids);
+    Tensor loss_weights = torch::zeros_like(input_ids, TensorOptions(kFloat));
 
     // mask random tokens
     auto input_acc = input_ids.accessor<int64_t,2>();
     auto att_mask_acc = example.data.at(2).accessor<int64_t,2>();
-    auto weights_acc = loss_weights.accessor<double,2>();
+    auto weights_acc = loss_weights.accessor<float,2>();
     for (int i = 0; i < input_ids.size(0); ++i)
     {
         int j = 1; // skip [CLS] token
