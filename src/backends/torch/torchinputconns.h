@@ -51,7 +51,7 @@ namespace dd
 
         void reset();
 
-        // Size of data loaded in memory
+        /// Size of data loaded in memory
         size_t cache_size() const { return _batches.size(); }
 
         c10::optional<size_t> size() const override {
@@ -62,10 +62,10 @@ namespace dd
 
         c10::optional<TorchBatch> get_batch(BatchRequestType request) override;
 
-        // Returns a batch containing all the cached data
+        /// Returns a batch containing all the cached data
         TorchBatch get_cached();
 
-        // Split a percentage of this dataset
+        /// Split a percentage of this dataset
         TorchDataset split(double start, double stop);
     };
 

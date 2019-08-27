@@ -339,7 +339,16 @@ namespace dd
                     in_vals.push_back(tensor.to(_device));
                 Tensor y = batch.target.at(0).to(_device);
 
-                Tensor y_pred = to_tensor_safe(_module.forward(in_vals));
+                Tensor y_pred;
+                try
+                {
+                    y_pred = to_tensor_safe(_module.forward(in_vals));
+                }
+                catch (std::exception &e)
+                {
+                    throw MLLibInternalException(std::string("Libtorch error:") + e.what());
+                }
+
                 Tensor loss;
                 if (_masked_lm)
                 {
@@ -528,7 +537,15 @@ namespace dd
                 in_vals.push_back(tensor.to(_device));
             
             /// XXX: try catch
-            Tensor output = to_tensor_safe(_module.forward(in_vals));
+            Tensor output;
+            try
+            {
+                output = to_tensor_safe(_module.forward(in_vals));
+            }
+            catch (std::exception &e)
+            {
+                throw MLLibInternalException(std::string("Libtorch error:") + e.what());
+            }
 
             if (batch.target.empty())
                 throw MLLibBadParamException("Missing label on data while testing");
