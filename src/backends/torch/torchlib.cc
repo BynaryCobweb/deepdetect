@@ -513,6 +513,18 @@ namespace dd
         int test_size = dataset.cache_size();
         int nclasses = _masked_lm ? inputc.vocab_size() : _nclasses;
 
+        // confusion matrix is irrelevant to masked_lm training
+        if (_masked_lm && ad_out.has("measure"))
+        {
+            auto meas = ad_out.get("measure").get<std::vector<std::string>>();
+            std::vector<std::string>::iterator it;
+            if ((it = std::find(meas.begin(), meas.end(), "cmfull")) != meas.end())
+                meas.erase(it);
+            if ((it = std::find(meas.begin(), meas.end(), "cmdiag")) != meas.end())
+                meas.erase(it);
+            ad_out.add("measure", meas);
+        }
+
         auto dataloader = torch::data::make_data_loader(
             dataset,
             data::DataLoaderOptions(batch_size)
@@ -536,7 +548,6 @@ namespace dd
             for (Tensor tensor : batch.data)
                 in_vals.push_back(tensor.to(_device));
             
-            /// XXX: try catch
             Tensor output;
             try
             {
@@ -551,6 +562,7 @@ namespace dd
                 throw MLLibBadParamException("Missing label on data while testing");
             Tensor labels = batch.target[0];
             Tensor loss_weights;
+
             if (_masked_lm)
             {
                 output = output.view(IntList{-1, output.size(2)});
@@ -579,6 +591,12 @@ namespace dd
                 }
                 bad.add("target", static_cast<double>(labels_acc[j]));
                 bad.add("pred", predictions);
+                // auto &tinputc = reinterpret_cast<TxtTorchInputConnector&>(inputc);
+                /* 
+                std::cout << "target: " << labels_acc[j] << std::endl;
+                std::cout << "masking: " << batch.data[0][0][j] << " " << batch.data[2][0][j] << std::endl;
+                std::cout << "pred: " << std::distance(predictions.begin(), std::max_element(predictions.begin(), predictions.end())) << std::endl << std::endl;
+                */
                 ad_res.add(std::to_string(entry_id), bad);
                 ++entry_id;
             }
