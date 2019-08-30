@@ -128,12 +128,12 @@ TorchBatch TxtTorchInputFileConn::generate_masked_lm_batch(const TorchBatch &exa
     std::uniform_real_distribution<double> uniform(0, 1);
     std::uniform_int_distribution<int64_t> vocab_distrib(0, vocab_size());
     Tensor input_ids = example.data.at(0).clone();
-    Tensor loss_weights = torch::zeros_like(input_ids, TensorOptions(kFloat));
+    Tensor lm_labels = torch::ones_like(input_ids, TensorOptions(kLong)) * -1;
 
     // mask random tokens
     auto input_acc = input_ids.accessor<int64_t,2>();
     auto att_mask_acc = example.data.at(2).accessor<int64_t,2>();
-    auto weights_acc = loss_weights.accessor<float,2>();
+    auto labels_acc = lm_labels.accessor<int64_t,2>();
     for (int i = 0; i < input_ids.size(0); ++i)
     {
         int j = 1; // skip [CLS] token
@@ -142,6 +142,8 @@ TorchBatch TxtTorchInputFileConn::generate_masked_lm_batch(const TorchBatch &exa
             double rand_num = uniform(_rng);
             if (rand_num < _lm_params._change_prob)
             {
+                labels_acc[i][j] = input_acc[i][j];
+                
                 rand_num = uniform(_rng);
                 if (rand_num < _lm_params._mask_prob)
                 {
@@ -151,15 +153,13 @@ TorchBatch TxtTorchInputFileConn::generate_masked_lm_batch(const TorchBatch &exa
                 {
                     input_acc[i][j] = vocab_distrib(_rng);
                 }
-                weights_acc[i][j] = 1;
             }
             ++j;
         }
     }
 
     TorchBatch output;
-    output.target.push_back(example.data.at(0));
-    output.target.push_back(loss_weights);
+    output.target.push_back(lm_labels);
     output.data.push_back(input_ids);
     for (int i = 1; i < example.data.size(); ++i)
     {

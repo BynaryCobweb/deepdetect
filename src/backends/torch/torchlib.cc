@@ -217,6 +217,8 @@ namespace dd
         this->_logger->info("Loading ml model from file {}.", this->_mlmodel._traced);
         this->_logger->info("Loading weights from file {}.", this->_mlmodel._weights);
         _module.load(this->_mlmodel);
+
+        this->_mltype = "classification";
     }
 
     template <class TInputConnectorStrategy, class TOutputConnectorStrategy, class TMLModel>
@@ -282,6 +284,8 @@ namespace dd
         {
             eval_dataset = inputc._test_dataset; //.split(0, 0.1);
         }
+        std::cout << "train: " <<  inputc._dataset.cache_size() << std::endl;
+        std::cout << "test: " << inputc._test_dataset.cache_size() << std::endl;
 
         // create solver
         std::unique_ptr<optim::Optimizer> optimizer;
@@ -354,7 +358,8 @@ namespace dd
                 {
                     loss = torch::nll_loss(
                         torch::log_softmax(y_pred.view(IntList{-1, y_pred.size(2)}), 1),
-                        y.view(IntList{-1})
+                        y.view(IntList{-1}),
+                        {}, Reduction::Mean, -1
                     );
                 }
                 else
@@ -561,26 +566,19 @@ namespace dd
             if (batch.target.empty())
                 throw MLLibBadParamException("Missing label on data while testing");
             Tensor labels = batch.target[0];
-            Tensor loss_weights;
 
             if (_masked_lm)
             {
                 output = output.view(IntList{-1, output.size(2)});
                 labels = labels.view(IntList{-1});
-                loss_weights = batch.target.at(1).view(IntList{-1});
-            }
-            else
-            {
-                loss_weights = torch::ones_like(labels, TensorOptions(kFloat));
             }
             output = torch::softmax(output, 1).to(cpu);
             auto output_acc = output.accessor<float,2>();
             auto labels_acc = labels.accessor<int64_t,1>();
-            auto loss_weights_acc = loss_weights.accessor<float,1>();
 
             for (int j = 0; j < labels.size(0); ++j)
             {
-                if (_masked_lm && loss_weights_acc[j] <= std::numeric_limits<float>::epsilon())
+                if (_masked_lm && labels_acc[j] == -1)
                     continue;
 
                 APIData bad;
