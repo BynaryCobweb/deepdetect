@@ -284,8 +284,6 @@ namespace dd
         {
             eval_dataset = inputc._test_dataset; //.split(0, 0.1);
         }
-        std::cout << "train: " <<  inputc._dataset.cache_size() << std::endl;
-        std::cout << "test: " << inputc._test_dataset.cache_size() << std::endl;
 
         // create solver
         std::unique_ptr<optim::Optimizer> optimizer;
@@ -339,7 +337,7 @@ namespace dd
                     batch.target.at(0) = to_one_hot(batch.target.at(0), _nclasses);
                 }
                 std::vector<c10::IValue> in_vals;
-                for (Tensor tensor : example.data)
+                for (Tensor tensor : batch.data)
                     in_vals.push_back(tensor.to(_device));
                 Tensor y = batch.target.at(0).to(_device);
 
@@ -386,9 +384,13 @@ namespace dd
                     this->add_meas("remain_time", avg_it_time * iter_size * (iterations - it) / 1000.0);
                     this->add_meas("train_loss", train_loss);
                     this->add_meas_per_iter("train_loss", train_loss);
+                    int64_t elapsed_it = it + 1;
+                    if (log_batch_period != 0 && elapsed_it % log_batch_period == 0)
+                    {
+                        this->_logger->info("Iteration {}/{}: loss is {}", elapsed_it, iterations, train_loss);
+                    }
                     train_loss = 0;
 
-                    int64_t elapsed_it = it + 1;
                     if (elapsed_it % test_interval == 0 && elapsed_it != iterations && !eval_dataset.empty())
                     {
                         APIData meas_out;
@@ -406,11 +408,6 @@ namespace dd
                                 this->add_meas_per_iter(name, mval);
                             }
                         }
-                    }
-
-                    if (log_batch_period != 0 && elapsed_it % log_batch_period == 0)
-                    {
-                        this->_logger->info("Iteration {}/{}: loss is {}", elapsed_it, iterations, loss_val);
                     }
 
                     if ((save_period != 0 && elapsed_it % save_period == 0) || elapsed_it == iterations)
@@ -598,7 +595,7 @@ namespace dd
                 ad_res.add(std::to_string(entry_id), bad);
                 ++entry_id;
             }
-            this->_logger->info("Testing: {}/{} entries processed", entry_id, test_size);
+            // this->_logger->info("Testing: {}/{} entries processed", entry_id, test_size);
         }
 
         ad_res.add("iteration",this->get_meas("iteration"));

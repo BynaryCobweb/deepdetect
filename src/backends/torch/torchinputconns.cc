@@ -140,7 +140,7 @@ TorchBatch TxtTorchInputFileConn::generate_masked_lm_batch(const TorchBatch &exa
         while (j < input_ids.size(1) && att_mask_acc[i][j] != 0)
         {
             double rand_num = uniform(_rng);
-            if (rand_num < _lm_params._change_prob)
+            if (rand_num < _lm_params._change_prob && input_acc[i][j] != _sep_pos)
             {
                 labels_acc[i][j] = input_acc[i][j];
                 

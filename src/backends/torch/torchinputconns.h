@@ -82,7 +82,11 @@ namespace dd
     {
     public:
         TorchInputInterface() {}
-        TorchInputInterface(const TorchInputInterface &i) {}
+        TorchInputInterface(const TorchInputInterface &i) {
+            _lm_params = i._lm_params;
+            _dataset = i._dataset;
+            _test_dataset = i._test_dataset;
+        }
 
         ~TorchInputInterface() {}
 
