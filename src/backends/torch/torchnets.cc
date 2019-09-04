@@ -89,8 +89,8 @@ namespace dd {
     TransformerEncoderLayerImpl::TransformerEncoderLayerImpl(const TransformerOptions &config)
         : _attention{config}, _dropout{config.dropout}
     {
-        _linear1 = register_module("linear1", nn::Linear(config.hidden_size, config.hidden_size));
-        _linear2 = register_module("linear2", nn::Linear(config.hidden_size, config.hidden_size));
+        _linear1 = register_module("linear1", nn::Linear(config.hidden_size, config.intermediate_size));
+        _linear2 = register_module("linear2", nn::Linear(config.intermediate_size, config.hidden_size));
         _norm1 = register_module("norm1", nn::BatchNorm(config.hidden_size));
         _norm2 = register_module("norm2", nn::BatchNorm(config.hidden_size));
         register_module("dropout", _dropout);
@@ -101,6 +101,7 @@ namespace dd {
         Tensor att_output = _attention(hidden_layer, attention_mask);
         Tensor output = _norm1(_linear1(att_output));
         output = _dropout(output);
+        // TODO original model use some residual architecture here
         output = _norm2(_linear2(output));
         return output;
     }

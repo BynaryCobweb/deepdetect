@@ -29,6 +29,7 @@ namespace dd {
 
 struct TransformerOptions {
     int hidden_size;
+    int intermediate_size;
     int head_count;
     int num_layers;
     double dropout = 0;
