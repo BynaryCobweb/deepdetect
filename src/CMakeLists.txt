@@ -64,6 +64,8 @@ if (USE_TORCH)
     backends/torch/torchlib.cc
     backends/torch/torchmodel.cc
     backends/torch/torchinputconns.cc
+    utils/db/db_lmdb.cpp
+    utils/db/db.cpp
   )
 endif()
 if (USE_TENSORRT)
