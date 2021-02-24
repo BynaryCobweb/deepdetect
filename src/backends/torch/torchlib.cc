@@ -324,7 +324,8 @@ namespace dd
     // TorchVision detection models
     else if (_template == "fasterrcnn" || _template == "retinanet")
       {
-        // fasterrcnn output is a tuple (Loss, Predictions)
+        // torchvision models output is a tuple (Loss, Predictions)
+        _module._loss_id = 0;
         _module._linear_in = 1;
       }
     else if (!_template.empty())
@@ -680,6 +681,12 @@ namespace dd
               {
                 in_vals.push_back(tensor.to(_main_device));
               }
+            if (_loss == "model")
+              {
+                // if the model computes the loss then we pass target as input
+                for (Tensor tensor : batch.target)
+                  in_vals.push_back(tensor.to(_main_device));
+              }
 
             if (batch.target.size() == 0)
               {
@@ -687,7 +694,6 @@ namespace dd
                     "Batch " + std::to_string(batch_id) + ": no target");
               }
             Tensor y = batch.target.at(0).to(_main_device);
-
             Tensor y_pred;
             try
               {
@@ -702,7 +708,13 @@ namespace dd
                                              + e.what());
               }
 
-            Tensor loss = tloss.loss(y_pred, y, in_vals);
+            Tensor loss;
+            if (_loss == "model")
+              {
+                loss = y_pred;
+              }
+            else
+              loss = tloss.loss(y_pred, y, in_vals);
 
             if (iter_size > 1)
               loss /= iter_size;
@@ -1110,7 +1122,7 @@ namespace dd
 
             if (bbox)
               {
-                // Supporting only Faster RCNN format at the moment.
+                // Supporting only torchvision format at the moment.
                 auto out_dicts = out_ivalue.toList();
 
                 for (size_t i = 0; i < out_dicts.size(); ++i)
@@ -1138,11 +1150,14 @@ namespace dd
 
                     auto out_dict = out_dicts.get(i).toGenericDict();
                     Tensor bboxes_tensor
-                        = torch_utils::to_tensor_safe(out_dict.at("boxes"));
+                        = torch_utils::to_tensor_safe(out_dict.at("boxes"))
+                              .to(cpu);
                     Tensor labels_tensor
-                        = torch_utils::to_tensor_safe(out_dict.at("labels"));
+                        = torch_utils::to_tensor_safe(out_dict.at("labels"))
+                              .to(cpu);
                     Tensor score_tensor
-                        = torch_utils::to_tensor_safe(out_dict.at("scores"));
+                        = torch_utils::to_tensor_safe(out_dict.at("scores"))
+                              .to(cpu);
 
                     auto bboxes_acc = bboxes_tensor.accessor<float, 2>();
                     auto labels_acc = labels_tensor.accessor<int64_t, 1>();
@@ -1326,6 +1341,39 @@ namespace dd
     return 0;
   }
 
+  double area(const std::vector<double> &bbox)
+  {
+    return (bbox[2] - bbox[0]) * (bbox[3] - bbox[1]);
+  }
+
+  std::vector<double> intersect(const std::vector<double> &bbox1,
+                                const std::vector<double> &bbox2)
+  {
+    std::vector<double> inter{
+      std::max(bbox1[0], bbox2[0]),
+      std::max(bbox1[1], bbox2[1]),
+      std::min(bbox1[2], bbox2[2]),
+      std::min(bbox1[3], bbox2[3]),
+    };
+    // if xmin > xmax or ymin > ymax, intersection is empty
+    if (inter[0] >= inter[2] || inter[1] >= inter[3])
+      {
+        return { 0., 0., 0., 0. };
+      }
+    else
+      return inter;
+  }
+
+  double iou(const std::vector<double> &bbox1,
+             const std::vector<double> &bbox2)
+  {
+    double a1 = area(bbox1);
+    double a2 = area(bbox2);
+    auto inter = intersect(bbox1, bbox2);
+    double ainter = area(inter);
+    return ainter / (a1 + a2 - ainter);
+  }
+
   template <class TInputConnectorStrategy, class TOutputConnectorStrategy,
             class TMLModel>
   int TorchLib<TInputConnectorStrategy, TOutputConnectorStrategy,
@@ -1336,6 +1384,7 @@ namespace dd
                                const std::string &test_name)
   {
     APIData ad_res;
+    APIData ad_bbox;
     APIData ad_out = ad.getobj("parameters").getobj("output");
     int nclasses = _masked_lm ? inputc.vocab_size() : _nclasses;
 
@@ -1368,9 +1417,14 @@ namespace dd
           in_vals.push_back(tensor.to(_main_device));
 
         Tensor output;
+        c10::IValue out_ivalue;
         try
           {
-            output = torch_utils::to_tensor_safe(_module.forward(in_vals));
+            out_ivalue = _module.forward(in_vals);
+            if (!_bbox)
+              {
+                output = torch_utils::to_tensor_safe(out_ivalue);
+              }
           }
         catch (std::exception &e)
           {
@@ -1408,6 +1462,133 @@ namespace dd
                 bad.add("target", targets);
                 bad.add("pred", predictions);
                 ad_res.add(std::to_string(entry_id), bad);
+                ++entry_id;
+              }
+          }
+        else if (_bbox)
+          {
+            // Supporting only Faster RCNN format at the moment.
+            auto out_dicts = out_ivalue.toList();
+            Tensor targ_bboxes = batch.target.at(0);
+            Tensor targ_labels = batch.target.at(1);
+            auto targ_bboxes_acc = targ_bboxes.accessor<float, 3>();
+            auto targ_labels_acc = targ_labels.accessor<int64_t, 2>();
+
+            for (size_t i = 0; i < out_dicts.size(); ++i)
+              {
+                auto out_dict = out_dicts.get(i).toGenericDict();
+                Tensor bboxes_tensor
+                    = torch_utils::to_tensor_safe(out_dict.at("boxes"))
+                          .to(cpu);
+                Tensor labels_tensor
+                    = torch_utils::to_tensor_safe(out_dict.at("labels"))
+                          .to(cpu);
+                Tensor score_tensor
+                    = torch_utils::to_tensor_safe(out_dict.at("scores"))
+                          .to(cpu);
+
+                auto bboxes_acc = bboxes_tensor.accessor<float, 2>();
+                auto labels_acc = labels_tensor.accessor<int64_t, 1>();
+                auto score_acc = score_tensor.accessor<float, 1>();
+
+                APIData bad; // see caffe
+                const int targ_bbox_count = targ_labels.size(1);
+                const int pred_bbox_count = labels_tensor.size(0);
+                std::vector<bool> match_used(targ_bbox_count, false);
+
+                struct eval_info
+                {
+                  // every positive score
+                  std::vector<double> tp_d;
+                  // 1 if true pos, 0 otherwise
+                  std::vector<int> tp_i;
+                  // every positive score
+                  std::vector<double> fp_d;
+                  // 1 if false pos, 0 otherwise
+                  std::vector<int> fp_i;
+                  int num_pos;
+                  // XXX: tp_d == fp_d & tp_i == !fp_i
+                  // This could be refactored along with supervised output
+                  // connector
+                };
+
+                std::vector<eval_info> eval_infos(_nclasses);
+
+                for (int j = 0; j < pred_bbox_count; ++j)
+                  {
+                    double score = score_acc[j];
+                    int cls = labels_acc[j];
+
+                    if (cls >= static_cast<int>(_nclasses))
+                      {
+                        throw MLLibInternalException(
+                            "Model output class: " + std::to_string(cls)
+                            + " is invalid for nclasses = "
+                            + std::to_string(_nclasses));
+                      }
+
+                    std::vector<double> bbox{
+                      bboxes_acc[j][0],
+                      bboxes_acc[j][1],
+                      bboxes_acc[j][2],
+                      bboxes_acc[j][3],
+                    };
+
+                    bool found = false;
+
+                    for (int k = 0; k < targ_bbox_count; ++k)
+                      {
+                        if (!match_used[k])
+                          {
+                            std::vector<double> targ_bbox{
+                              targ_bboxes_acc[i][k][0],
+                              targ_bboxes_acc[i][k][1],
+                              targ_bboxes_acc[i][k][2],
+                              targ_bboxes_acc[i][k][3],
+                            };
+
+                            if (iou(bbox, targ_bbox) > 0.5
+                                && targ_labels_acc[i][k] == cls)
+                              {
+                                match_used[k] = true;
+                                found = true;
+
+                                eval_infos[cls].tp_d.push_back(score);
+                                eval_infos[cls].tp_i.push_back(1);
+                                eval_infos[cls].fp_d.push_back(score);
+                                eval_infos[cls].fp_i.push_back(0);
+                                break;
+                              }
+                          }
+                      }
+
+                    if (!found)
+                      {
+                        eval_infos[cls].tp_d.push_back(score);
+                        eval_infos[cls].tp_i.push_back(0);
+                        eval_infos[cls].fp_d.push_back(score);
+                        eval_infos[cls].fp_i.push_back(1);
+                      }
+                  }
+
+                for (int k = 0; k < targ_bbox_count; ++k)
+                  {
+                    eval_infos[targ_labels_acc[i][k]].num_pos++;
+                  }
+                std::vector<APIData> vbad;
+                for (size_t label = 0; label < _nclasses; ++label)
+                  {
+                    APIData lbad;
+                    lbad.add("tp_d", eval_infos[label].tp_d);
+                    lbad.add("tp_i", eval_infos[label].tp_i);
+                    lbad.add("fp_d", eval_infos[label].fp_d);
+                    lbad.add("fp_i", eval_infos[label].fp_i);
+                    lbad.add("num_pos", eval_infos[label].num_pos);
+                    lbad.add("label", static_cast<int>(label));
+                    vbad.push_back(lbad);
+                  }
+
+                ad_bbox.add(std::to_string(entry_id), vbad);
                 ++entry_id;
               }
           }
@@ -1481,6 +1662,12 @@ namespace dd
           clnames.push_back(this->_mlmodel.get_hcorresp(i));
         ad_res.add("clnames", clnames);
         ad_res.add("nclasses", nclasses);
+      }
+    if (_bbox)
+      {
+        ad_res.add("bbox", true);
+        ad_res.add("pos_count", entry_id);
+        ad_res.add("0", ad_bbox);
       }
     ad_res.add("batch_size",
                entry_id); // here batch_size = tested entries count

@@ -40,6 +40,8 @@ static std::string not_found_str
 
 static std::string incept_repo = "../examples/torch/resnet50_torch/";
 static std::string detect_repo = "../examples/torch/fasterrcnn_torch/";
+static std::string detect_train_repo
+    = "../examples/torch/fasterrcnn_train_torch";
 static std::string resnet50_train_repo
     = "../examples/torch/resnet50_training_torch_small/";
 static std::string resnet50_train_data
@@ -70,6 +72,11 @@ static std::string bert_train_repo
 static std::string bert_train_data
     = "../examples/torch/bert_training_torch_140_transformers_251/data/";
 
+static std::string fasterrcnn_train_data
+    = "../examples/torch/fasterrcnn_train_torch/train.txt";
+static std::string fasterrcnn_test_data
+    = "../examples/torch/fasterrcnn_train_torch/test.txt";
+
 static std::string sinus = "../examples/all/sinus/";
 
 static std::string iterations_nbeats_cpu = "100";
@@ -79,6 +86,7 @@ static std::string iterations_ttransformer_gpu = "1000";
 
 static std::string iterations_resnet50 = "200";
 static std::string iterations_vit = "200";
+static std::string iterations_detection = "200";
 
 static int torch_seed = 1235;
 static std::string torch_lr = "1e-5";
@@ -872,6 +880,68 @@ TEST(torchapi, service_train_images_split_regression_db_false)
   fileops::clear_directory(resnet50_train_repo + "test_0.lmdb");
   fileops::remove_dir(resnet50_train_repo + "train.lmdb");
   fileops::remove_dir(resnet50_train_repo + "test_0.lmdb");
+}
+
+TEST(torchapi, service_train_object_detection)
+{
+  setenv("CUBLAS_WORKSPACE_CONFIG", ":4096:8", true);
+  torch::manual_seed(torch_seed);
+  at::globalContext().setDeterministicCuDNN(true);
+
+  JsonAPI japi;
+  std::string sname = "detectserv";
+  std::string jstr
+      = "{\"mllib\":\"torch\",\"description\":\"fasterrcnn\",\"type\":"
+        "\"supervised\",\"model\":{\"repository\":\""
+        + detect_train_repo
+        + "\"},\"parameters\":{\"input\":{\"connector\":\"image\",\"height\":"
+          "224,\"width\":224,\"rgb\":true,\"scale\":0.0039,\"bbox\":true},"
+          "\"mllib\":{\"template\":\"fasterrcnn\",\"gpu\":true,\"loss\":"
+          "\"model\",\"nclasses\":1}}}";
+
+  std::string joutstr = japi.jrender(japi.service_create(sname, jstr));
+  ASSERT_EQ(created_str, joutstr);
+
+  // Train
+  std::string jtrainstr
+      = "{\"service\":\"detectserv\",\"async\":false,\"parameters\":{"
+        "\"mllib\":{\"solver\":{\"iterations\":"
+        + iterations_detection + ",\"base_lr\":" + torch_lr
+        + ",\"iter_size\":16,\"solver_"
+          "type\":\"ADAM\",\"test_interval\":200},\"net\":{\"batch_size\":1},"
+          "\"resume\":false},"
+          "\"input\":{\"seed\":12347,\"db\":true,\"shuffle\":true},"
+          "\"output\":{\"measure\":[\"map\"]}},\"data\":[\""
+        + fasterrcnn_train_data + "\",\"" + fasterrcnn_test_data + "\"]}";
+
+  joutstr = japi.jrender(japi.service_train(jtrainstr));
+  JDoc jd;
+  std::cout << "joutstr=" << joutstr << std::endl;
+  jd.Parse<rapidjson::kParseNanAndInfFlag>(joutstr.c_str());
+  ASSERT_TRUE(!jd.HasParseError());
+  ASSERT_EQ(201, jd["status"]["code"]);
+
+  ASSERT_TRUE(jd["body"]["measure"]["iteration"] == 200) << "iterations";
+  ASSERT_TRUE(jd["body"]["measure"]["map"].GetDouble() <= 1.0) << "map";
+  ASSERT_TRUE(jd["body"]["measure"]["map"].GetDouble() > 1.0) << "map";
+
+  std::unordered_set<std::string> lfiles;
+  fileops::list_directory(detect_train_repo, true, false, false, lfiles);
+  for (std::string ff : lfiles)
+    {
+      if (ff.find("checkpoint") != std::string::npos
+          || ff.find("solver") != std::string::npos)
+        remove(ff.c_str());
+    }
+  ASSERT_TRUE(!fileops::file_exists(detect_train_repo + "checkpoint-"
+                                    + iterations_resnet50 + ".ptw"));
+  ASSERT_TRUE(!fileops::file_exists(detect_train_repo + "checkpoint-"
+                                    + iterations_resnet50 + ".pt"));
+
+  fileops::clear_directory(detect_train_repo + "train.lmdb");
+  fileops::clear_directory(detect_train_repo + "test_0.lmdb");
+  fileops::remove_dir(detect_train_repo + "train.lmdb");
+  fileops::remove_dir(detect_train_repo + "test_0.lmdb");
 }
 
 TEST(torchapi, service_train_images_native)

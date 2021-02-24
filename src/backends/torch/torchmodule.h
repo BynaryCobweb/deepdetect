@@ -195,7 +195,10 @@ namespace dd
     torch::nn::Linear _linear = nullptr;
 
     torch::Device _device;
-    int _linear_in = 0; /**<id of the input of the final linear layer */
+    bool _training = false; /**<true if model is in training mode */
+    int _linear_in = 0;     /**<id of the input of the final linear layer */
+    int _loss_id = -1; /**<id of the loss output. If >= 0, forward returns this
+                          output only during training */
     bool _hidden_states = false; /**< Take BERT hidden states as input. */
 
     bool _require_linear_layer = false;

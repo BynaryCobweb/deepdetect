@@ -1442,6 +1442,9 @@ These templates require an external traced model to work:
 - Language models:
 	- `bert`
 	- `gpt2`
+- Detection models:
+	- `fasterrcnn`
+	- `retinanet`
 
 ## Parameters
 

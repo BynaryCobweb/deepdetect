@@ -294,7 +294,16 @@ namespace dd
             source = torch_utils::unwrap_c10_vector(output);
           }
       }
-    c10::IValue out_val = source.at(_linear_in);
+    c10::IValue out_val;
+    if (_training && _loss_id >= 0)
+      {
+        out_val = source.at(_loss_id);
+      }
+    else
+      {
+        out_val = source.at(_linear_in);
+      }
+
     if (_hidden_states)
       {
         // out_val is a tuple containing tensors of dimension n_batch *
@@ -510,6 +519,8 @@ namespace dd
       _linear->eval();
     if (_native)
       _native->eval();
+
+    _training = false;
   }
 
   void TorchModule::train()
@@ -522,6 +533,8 @@ namespace dd
       _linear->train();
     if (_native)
       _native->train();
+
+    _training = true;
   }
 
   void TorchModule::free()
